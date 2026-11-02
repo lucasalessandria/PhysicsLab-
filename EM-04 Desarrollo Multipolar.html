@@ -1,0 +1,1916 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EM-04 Desarrollo Multipolar — PhysicsLab</title>
+<!-- PhysicsLab · módulo independiente (generado desde helmholtz-sim/scenes).
+     Necesita conexión a internet: three.js (unpkg), KaTeX (jsdelivr) y fuentes (Google Fonts). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<style>
+/* ── Subconjunto de helmholtz-sim/style.css (pantalla de simulación) ── */
+:root {
+    /* Acento de la UI como triplete RGB → permite cambiar de tema en un solo lugar */
+    --acc: 0, 255, 136;
+    --green-glow:   #00ff88;
+    --green-mid:    #00cc66;
+    --green-dim:    #007744;
+    --green-tint:   rgba(var(--acc), 0.06);
+    --green-border: rgba(var(--acc), 0.25);
+    --green-border-bright: rgba(var(--acc), 0.55);
+    --teal:         #00e5cc;
+    --bg-base:      #040d08;
+    --bg-panel:     rgba(5, 20, 12, 0.80);
+    --bg-card:      rgba(var(--acc), 0.04);
+    --text-primary: #e0ffe8;
+    --text-secondary: rgba(180, 255, 210, 0.65);
+    --text-dim:     rgba(120, 200, 150, 0.45);
+    --scan-color:   rgba(var(--acc), 0.03);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Rajdhani', sans-serif;
+}
+
+/* ── Scanline overlay ── */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        var(--scan-color) 3px,
+        var(--scan-color) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+}
+
+/* ── Utility ── */
+.font-orbitron { font-family: 'Orbitron', monospace; }
+.font-mono     { font-family: 'Share Tech Mono', monospace; }
+
+/* =============================================
+   BARRA DE DESPLAZAMIENTO PERSONALIZADA
+   (usa --acc → se adapta a los 4 temas)
+   ============================================= */
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--acc), 0.55) transparent;
+}
+
+/* WebKit / Chromium / Edge */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(var(--acc), 0.04);
+    border-radius: 10px;
+    margin: 4px;
+}
+::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    /* riel de cristal con glow del color de acento */
+    background:
+        linear-gradient(180deg,
+            rgba(var(--acc), 0.65) 0%,
+            rgba(var(--acc), 0.40) 50%,
+            rgba(var(--acc), 0.65) 100%);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.30),
+        0 0 8px rgba(var(--acc), 0.35);
+    transition: background 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+    background:
+        linear-gradient(180deg,
+            rgba(var(--acc), 0.95) 0%,
+            rgba(var(--acc), 0.70) 50%,
+            rgba(var(--acc), 0.95) 100%);
+    background-clip: padding-box;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.45),
+        0 0 14px rgba(var(--acc), 0.60);
+}
+::-webkit-scrollbar-thumb:active {
+    background: rgb(var(--acc));
+    background-clip: padding-box;
+}
+/* sin flechas arriba/abajo */
+::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* =============================================
+   GLASS PANEL
+   ============================================= */
+.glass-panel {
+    background: transparent;
+    backdrop-filter: blur(32px) saturate(220%);
+    -webkit-backdrop-filter: blur(32px) saturate(220%);
+    border: 1px solid rgba(var(--acc), 0.3);
+    border-radius: 16px;
+    box-shadow:
+        0 8px 32px 0 rgba(var(--acc), 0.1),
+        inset 0 2px 8px 0 rgba(var(--acc), 0.4),
+        inset 0 -1px 2px 0 rgba(var(--acc), 0.1);
+    position: relative;
+    /* overflow lo define cada elemento que lo necesite:
+       .sim-panel → overflow-y:auto (scroll)
+       .ai-chat-panel / .exp-card → overflow:hidden (clip propio) */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel:hover {
+    background: transparent;
+    border-color: rgba(var(--acc), 0.6);
+    box-shadow:
+        0 12px 40px 0 rgba(var(--acc), 0.25),
+        inset 0 3px 12px 0 rgba(var(--acc), 0.5),
+        inset 0 -1px 4px 0 rgba(var(--acc), 0.2);
+    transform: translateY(-2px);
+}
+
+.glass-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(var(--acc),0.15) 0%, transparent 40%, rgba(var(--acc),0.05) 100%);
+    pointer-events: none;
+    border-radius: 16px;
+    transition: background 0.3s;
+}
+
+.glass-panel:hover::before {
+    background: linear-gradient(135deg, rgba(var(--acc),0.25) 0%, transparent 45%, rgba(var(--acc),0.08) 100%);
+}
+
+/* =============================================
+   LIQUID GLASS — reactividad al cursor
+   (tilt 3D elástico gestionado por liquid.js +
+    reflejo radial que sigue al puntero)
+   ============================================= */
+/* preserve-3d solo en las tarjetas (tilt 3D de liquid.js).
+   Los glass-panel scrollables NO lo necesitan — preserve-3d invalida overflow en algunos browsers. */
+.exp-card {
+    transform-style: preserve-3d;
+    isolation: isolate;
+}
+.glass-panel {
+    isolation: isolate;
+}
+
+/* Reflejo líquido que sigue al cursor (posición vía --mx/--my desde liquid.js) */
+.exp-card::after,
+.glass-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%),
+        rgba(var(--acc), 0.20) 0%,
+        rgba(var(--acc), 0.07) 35%,
+        transparent 62%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: -1;
+}
+.exp-card:hover::after,
+.glass-panel:hover::after {
+    opacity: 1;
+}
+
+/* HUD corner accents removed per user request */
+.hud-corners {
+    position: relative;
+}
+
+/* =============================================
+   GLOWING TEXT
+   ============================================= */
+.text-glow {
+    color: var(--green-glow);
+    text-shadow: 0 0 10px rgba(var(--acc), 0.7), 0 0 30px rgba(var(--acc), 0.3);
+}
+.text-glow-dim {
+    color: var(--green-mid);
+    text-shadow: 0 0 8px rgba(var(--acc), 0.4);
+}
+.title-gradient {
+    background: linear-gradient(135deg, var(--green-glow) 0%, var(--teal) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 8px rgba(var(--acc), 0.4));
+}
+/* Lecturas numéricas en vivo (paneles de info de las simulaciones) */
+.readout {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+}
+.readout > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc), 0.04);
+}
+.readout > div span { color: var(--text-secondary); }
+.readout > div b {
+    color: var(--green-glow);
+    font-weight: 700;
+    text-shadow: 0 0 8px rgba(var(--acc), 0.4);
+}
+
+#sim-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+}
+
+#sim-screen.active { display: block; }
+
+/* Top bar */
+.sim-topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    z-index: 30;
+    background: transparent;
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--green-border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+}
+
+.back-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 16px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc),0.05);
+    color: var(--green-glow);
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.back-btn:hover {
+    background: rgba(var(--acc),0.12);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.25);
+}
+
+.topbar-scene-name {
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--green-glow);
+    text-shadow: 0 0 8px rgba(var(--acc),0.4);
+}
+
+.topbar-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--green-border);
+}
+
+.topbar-hint {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-left: auto;
+}
+
+/* Sidebar panels */
+.sim-panels {
+    position: absolute;
+    inset: 0;
+    top: 56px;
+    z-index: 20;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 20px;
+    gap: 20px;
+    pointer-events: none;
+}
+
+.sim-panel {
+    pointer-events: auto;
+    width: 300px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    /* El marco NO scrollea: recorta. El scroll vive en .panel-body, así el
+       reflejo ::after (backlight que sigue al cursor) cubre siempre toda la
+       altura visible del panel y no se corta al deslizar el contenido. */
+    overflow: hidden;
+    border-radius: 16px;
+    padding: 20px;
+}
+.panel-body::-webkit-scrollbar { width: 6px; }
+.panel-body::-webkit-scrollbar-track { background: rgba(var(--acc), 0.06); border-radius: 6px; margin: 6px; }
+.panel-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(var(--acc), 0.7), rgba(var(--acc), 0.45));
+    border-radius: 6px;
+    box-shadow: 0 0 6px rgba(var(--acc), 0.4);
+}
+.panel-body::-webkit-scrollbar-thumb:hover { background: rgb(var(--acc)); }
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--green-border);
+    position: relative;
+    z-index: 1;
+    flex: none;   /* cabecera fija: no se encoge cuando el cuerpo scrollea */
+}
+
+.panel-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    border: 1px solid var(--green-border);
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+
+.panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-primary);
+    flex: 1;
+    text-transform: uppercase;
+}
+
+.panel-body {
+    padding: 16px 20px 28px;   /* padding-bottom extra: evita que el último item quede cortado por el border-radius */
+    position: relative;
+    z-index: 1;
+    /* Único elemento con scroll del panel (el marco queda fijo). */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--acc), 0.6) rgba(var(--acc), 0.06);
+}
+
+/* Info panel content */
+.info-scene-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--green-glow), var(--teal));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.3;
+}
+
+.info-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.math-block {
+    background: rgba(var(--acc), 0.05);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(var(--acc), 0.3);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 3px rgba(var(--acc),0.2);
+    padding: 14px;
+    margin-bottom: 14px;
+    text-align: center;
+    font-size: 16px;
+    overflow-x: auto;
+}
+
+.explanation-block {
+    background: rgba(0,0,0,0.3);
+    border-left: 2px solid var(--green-mid);
+    border-radius: 0 8px 8px 0;
+    margin-bottom: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+details.explanation-block[open] {
+    padding-bottom: 12px;
+}
+
+details.explanation-block summary {
+    padding: 12px 14px;
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    cursor: pointer;
+    outline: none;
+    list-style: none;
+    position: relative;
+    user-select: none;
+}
+
+details.explanation-block summary::-webkit-details-marker {
+    display: none;
+}
+
+details.explanation-block summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+details.explanation-block[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details.explanation-block div.content {
+    padding: 0 14px 4px;
+    font-size: 13.5px;
+    margin: 0;
+}
+
+/* Fórmulas inline (KaTeX) en subtítulos y explicaciones: al renderizar fracciones,
+   el alto de la fórmula supera el de la línea de texto y se recortaba por abajo.
+   Hacerlas inline-block + más interlineado reserva su altura completa en la línea,
+   evitando el recorte en TODAS las escenas. */
+.info-subtitle,
+details.explanation-block div.content {
+    line-height: 1.95;
+    overflow: visible;
+}
+.info-subtitle .katex,
+details.explanation-block div.content .katex {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.hint-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+    line-height: 1.5;
+}
+
+/* Controls panel content */
+.controls-section {
+    margin-bottom: 20px;
+}
+.controls-section:last-child { margin-bottom: 0; }
+
+.control-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.control-name {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+.control-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--green-glow);
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Custom range slider */
+input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    position: relative;
+    z-index: 10;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(var(--acc),0.12);
+    outline: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+input[type=range]:hover {
+    background: rgba(var(--acc),0.20);
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--green-glow);
+    cursor: pointer;
+    border: 2px solid var(--bg-base);
+    box-shadow: 0 0 8px rgba(var(--acc),0.6);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 15px rgba(var(--acc),0.9);
+}
+input[type=range]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+}
+input[type=range]::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--green-glow);
+    border: 2px solid var(--bg-base);
+    box-shadow: 0 0 8px rgba(var(--acc),0.6);
+    cursor: pointer;
+}
+
+/* Toggle switch */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(var(--acc),0.06);
+}
+.toggle-row:last-child { border-bottom: none; }
+
+.toggle-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toggle-dot-color {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/* Custom toggle */
+.toggle-wrap {
+    position: relative;
+    display: inline-block;
+}
+.toggle-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+/* ── Toggle "liquid glass" (gel translúcido, knob gelatinoso) ── */
+.toggle-track {
+    display: block;
+    width: 48px;
+    height: 27px;
+    border-radius: 14px;
+    background: rgba(var(--acc), 0.06);
+    backdrop-filter: blur(6px) saturate(160%);
+    -webkit-backdrop-filter: blur(6px) saturate(160%);
+    border: 1px solid rgba(var(--acc), 0.25);
+    box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.35),
+        inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+/* Reflejo superior vidrioso del riel */
+.toggle-track::before {
+    content: '';
+    position: absolute;
+    inset: 1px 1px 55% 1px;
+    border-radius: 13px 13px 8px 8px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent);
+    pointer-events: none;
+}
+.toggle-wrap input:checked + .toggle-track {
+    background: linear-gradient(180deg, rgba(var(--acc), 0.50) 0%, rgba(var(--acc), 0.30) 100%);
+    border-color: rgba(var(--acc), 0.85);
+    box-shadow:
+        0 0 16px rgba(var(--acc), 0.55),
+        inset 0 1px 2px rgba(255, 255, 255, 0.45),
+        inset 0 -2px 4px rgba(var(--acc), 0.4);
+}
+
+.toggle-track .toggle-thumb {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 21px; height: 21px;
+    border-radius: 8px;                 /* squircle tipo gel, no círculo perfecto */
+    transform-origin: left center;       /* el estiramiento sale desde el borde */
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.7) 0%, rgba(210, 245, 225, 0.32) 100%);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.3),
+        inset 0 1px 1px rgba(255, 255, 255, 0.95),
+        inset 0 -2px 3px rgba(var(--acc), 0.15);
+    /* Easing elástico → el knob rebota como gelatina al asentarse */
+    transition: transform 0.5s cubic-bezier(0.34, 1.7, 0.5, 1),
+                background 0.3s, box-shadow 0.3s, border-radius 0.3s;
+}
+.toggle-wrap input:checked + .toggle-track .toggle-thumb {
+    transform: translateX(21px);
+    border-radius: 8px;
+    background: linear-gradient(160deg, rgba(245, 255, 250, 0.75) 0%, rgba(var(--acc), 0.4) 100%);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.25),
+        inset 0 1px 1px rgba(255, 255, 255, 0.95);
+}
+
+/* Squish gelatinoso mientras se presiona: el knob se estira a lo ancho */
+.toggle-track:active .toggle-thumb {
+    transform: scaleX(1.45);
+    border-radius: 9px;
+}
+.toggle-wrap input:checked + .toggle-track:active .toggle-thumb {
+    transform: translateX(11px) scaleX(1.45);
+}
+
+/* ── Capa líquida gooey (inyectada por toggle.js) ── */
+.toggle-goo {
+    position: absolute;
+    inset: 0;
+    filter: url(#pl-liquid-goo);   /* funde barra + blob como metaball */
+    pointer-events: none;
+}
+/* "Tubo" líquido horizontal: el blob siempre se funde con él */
+.toggle-fill {
+    position: absolute;
+    left: 5px; right: 5px;
+    top: 50%;
+    height: 10px;
+    transform: translateY(-50%);
+    border-radius: 5px;
+    background: rgba(150, 170, 160, 0.85);
+    transition: background 0.3s;
+}
+/* Blob viajero (gota que se estira con el knob) */
+.toggle-blob {
+    position: absolute;
+    top: 4px; left: 4px;
+    width: 19px; height: 19px;
+    border-radius: 50%;
+    transform-origin: left center;
+    background: rgba(170, 190, 180, 0.92);
+    transition: transform 0.5s cubic-bezier(0.34, 1.7, 0.5, 1), background 0.3s;
+}
+.toggle-wrap input:checked + .toggle-track .toggle-fill {
+    background: rgba(var(--acc), 0.95);
+}
+.toggle-wrap input:checked + .toggle-track .toggle-blob {
+    transform: translateX(21px);
+    background: rgba(var(--acc), 0.97);
+}
+/* Squish gelatinoso del blob, sincronizado con el knob */
+.toggle-track:active .toggle-blob {
+    transform: scaleX(1.45);
+}
+.toggle-wrap input:checked + .toggle-track:active .toggle-blob {
+    transform: translateX(11px) scaleX(1.45);
+}
+
+/* El knob de vidrio queda por encima como brillo, semitranslúcido */
+.toggle-track .toggle-thumb {
+    z-index: 1;
+}
+
+/* Generic button */
+.sci-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc),0.05);
+    color: var(--green-glow);
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+}
+.sci-btn:hover {
+    background: rgba(var(--acc),0.12);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.2);
+}
+.sci-btn:active { transform: scale(0.98); }
+
+.sci-btn.active {
+    background: rgba(var(--acc),0.20);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 15px rgba(var(--acc),0.3);
+}
+
+/* Dropdown select — estilo unificado para TODOS los <select> del proyecto */
+.sci-select {
+    width: 100%;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--green-border);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2300ffaa' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px 6px;
+    padding-right: 28px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sci-select:hover {
+    border-color: var(--green-glow);
+    box-shadow: 0 0 8px rgba(var(--acc),0.15);
+}
+.sci-select:focus {
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.25);
+}
+.sci-select option {
+    background: #0a0f0d;
+    color: var(--text-primary);
+    font-family: 'Share Tech Mono', monospace;
+    padding: 6px 10px;
+}
+
+/* Separator */
+.panel-sep {
+    height: 1px;
+    background: var(--green-border);
+    margin: 16px 0;
+    opacity: 0.5;
+}
+
+/* ── KaTeX overrides ── */
+.katex { color: var(--green-glow) !important; font-size: 0.95em !important; }
+.katex .mord, .katex .mrel, .katex .mbin { color: var(--green-glow) !important; }
+.katex-display { margin: 0 !important; }
+/* Red de seguridad: si una ecuación (matrices grandes, fórmulas con \qquad) es
+   más ancha que el panel, que scrollee horizontalmente en vez de quedar
+   recortada por el overflow-x:hidden de .panel-body (ver comentario ahí). */
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    padding-bottom: 4px;   /* espacio para que la barra de scroll no tape el glyph */
+}
+
+#sim-screen { transition: opacity 0.4s ease; opacity: 0; }
+#sim-screen.active { opacity: 1; }
+
+/* =============================================
+   MOTION LAYER — entrance & micro-interactions
+   (coherente con el sistema sci-fi verde)
+   NOTA: las animaciones de entrada usan fill-mode
+   `backwards` —no `forwards`— para no congelar los
+   transform de los :hover ya existentes.
+   ============================================= */
+
+/* ── Keyframes reutilizables ── */
+@keyframes fadeIn        { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeSlideUp   { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes headerDrop    { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }
+@keyframes panelInLeft   { from { opacity: 0; transform: translateX(-44px); } to { opacity: 1; transform: none; } }
+@keyframes panelInRight  { from { opacity: 0; transform: translateX(44px);  } to { opacity: 1; transform: none; } }
+@keyframes cardEnter     { from { opacity: 0; transform: translateY(28px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+/* CRT flicker muy sutil sobre las scanlines globales */
+body::after { animation: crtFlicker 7s ease-in-out infinite; }
+@keyframes crtFlicker {
+    0%, 100% { opacity: 1; }
+    48%      { opacity: 0.93; }
+    50%      { opacity: 0.86; }
+    52%      { opacity: 0.95; }
+}
+/* ── SIM: paneles y topbar entran al activar la escena ── */
+#sim-screen.active .sim-topbar {
+    animation: headerDrop 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s backwards;
+}
+#sim-screen.active #info-container {
+    animation: panelInLeft 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.22s backwards;
+}
+#sim-screen.active #controls-container {
+    animation: panelInRight 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.22s backwards;
+}
+
+/* Contenido inyectado en los paneles: cascada al cargar cada escena */
+#info-body > *, #controls-body > * { animation: fadeSlideUp 0.45s ease backwards; }
+#info-body > *:nth-child(1), #controls-body > *:nth-child(1) { animation-delay: 0.05s; }
+#info-body > *:nth-child(2), #controls-body > *:nth-child(2) { animation-delay: 0.10s; }
+#info-body > *:nth-child(3), #controls-body > *:nth-child(3) { animation-delay: 0.15s; }
+#info-body > *:nth-child(4), #controls-body > *:nth-child(4) { animation-delay: 0.20s; }
+#info-body > *:nth-child(5), #controls-body > *:nth-child(5) { animation-delay: 0.25s; }
+#info-body > *:nth-child(6), #controls-body > *:nth-child(6) { animation-delay: 0.30s; }
+#info-body > *:nth-child(7), #controls-body > *:nth-child(7) { animation-delay: 0.35s; }
+#info-body > *:nth-child(n+8), #controls-body > *:nth-child(n+8) { animation-delay: 0.40s; }
+
+/* ── Microinteracciones de controles ── */
+.back-btn:active { transform: scale(0.96); }
+
+/* Estados de foco accesibles (teclado) coherentes con el glow verde */
+.sci-btn:focus-visible,
+.back-btn:focus-visible {
+    outline: none;
+    border-color: var(--green-glow);
+    box-shadow: 0 0 0 2px rgba(var(--acc), 0.35), 0 0 16px rgba(var(--acc), 0.3);
+}
+/* ══════════════════════════════════════════════
+   PANELES CONTRAÍBLES (deslizan fuera de pantalla)
+   ══════════════════════════════════════════════ */
+.sim-panel {
+    /* Estado base explícito (translateX(0), no `none`): así el colapso
+       interpola limpio en ambos sentidos. Transicionar desde/hacia `none`
+       deja el transform pegado en algunos motores. */
+    transform: translateX(0);
+    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.4s ease;
+    will-change: transform;
+}
+/* !important: gana sobre la animación de entrada (panelInLeft/Right), que
+   mantiene el control de `transform` mientras la escena está activa. */
+#info-container.collapsed {
+    transform: translateX(-120%) !important;
+    opacity: 0;
+    pointer-events: none;
+}
+#controls-container.collapsed {
+    transform: translateX(120%) !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Botón de contraer en la cabecera del panel */
+.panel-collapse {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--green-border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--green-mid);
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+}
+.panel-collapse:hover {
+    border-color: var(--green-glow);
+    color: var(--green-glow);
+    background: rgba(var(--acc), 0.12);
+}
+.panel-collapse:active { transform: scale(0.9); }
+
+/* Pestañas fijas para reabrir un panel contraído */
+.panel-reveal-tab {
+    position: fixed;
+    top: 50%;
+    z-index: 25;
+    width: 24px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--green-border);
+    background: rgba(var(--acc), 0.06);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--green-glow);
+    cursor: pointer;
+    box-shadow: 0 0 14px rgba(var(--acc), 0.14);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.7);
+    transition: opacity 0.35s ease,
+                transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                background 0.2s ease,
+                border-color 0.2s ease;
+}
+.panel-reveal-tab.left  { left: 0;  border-left: none;  border-radius: 0 11px 11px 0; transform-origin: left center; }
+.panel-reveal-tab.right { right: 0; border-right: none; border-radius: 11px 0 0 11px; transform-origin: right center; }
+.panel-reveal-tab.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(-50%) scale(1);
+}
+.panel-reveal-tab.left.show:hover  { background: rgba(var(--acc), 0.16); border-color: var(--green-glow); transform: translateY(-50%) translateX(3px) scale(1); }
+.panel-reveal-tab.right.show:hover { background: rgba(var(--acc), 0.16); border-color: var(--green-glow); transform: translateY(-50%) translateX(-3px) scale(1); }
+
+
+#sim-screen .glass-panel,
+#labkit-panel,
+#labguide-panel {
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+}
+
+/* El hover de .glass-panel repinta sombras grandes sobre el canvas animado.
+   En la pantalla de simulación se queda el cambio de borde, que es gratis. */
+#sim-screen .glass-panel:hover {
+    box-shadow:
+        0 8px 32px 0 rgba(var(--acc), 0.1),
+        inset 0 2px 8px 0 rgba(var(--acc), 0.4),
+        inset 0 -1px 2px 0 rgba(var(--acc), 0.1);
+    transform: none;
+}
+/* Respeta la preferencia del sistema: sin animaciones de fondo ni blur pesado. */
+@media (prefers-reduced-motion: reduce) {
+    #sim-screen .glass-panel,
+    #labkit-panel,
+    #labguide-panel {
+        backdrop-filter: blur(8px) saturate(180%);
+        -webkit-backdrop-filter: blur(8px) saturate(180%);
+    }
+}
+
+/* ── Ajustes del módulo independiente ── */
+#sim-screen { display: block; opacity: 1; }
+.topbar-module-tag {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--green-glow);
+    text-shadow: 0 0 8px rgba(var(--acc), 0.5);
+}
+#pl-error {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 100; max-width: 460px; padding: 18px 22px;
+    font: 14px 'Share Tech Mono', monospace; color: #ffb3b3;
+    background: rgba(30, 6, 6, 0.92); border: 1px solid rgba(255, 90, 90, 0.5);
+    border-radius: 10px; display: none; white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+
+<div id="sim-screen" class="active">
+    <div id="canvas-container" style="position:absolute;inset:0;z-index:0;"></div>
+
+    <div class="sim-topbar">
+        <span class="topbar-module-tag">PHYSICSLAB</span>
+        <div class="topbar-divider"></div>
+        <span class="topbar-scene-name" id="topbar-scene-name">EM-04 — DESARROLLO MULTIPOLAR</span>
+        <span class="topbar-hint">[ CLICK + DRAG: ROTAR ] [ SCROLL: ZOOM ] [ SHIFT+DRAG: PAN ]</span>
+    </div>
+
+    <div class="sim-panels">
+        <div class="sim-panel glass-panel hud-corners" id="info-container">
+            <div class="panel-header">
+                <span class="panel-badge">INFO</span>
+                <span class="panel-title">Fundamento Físico</span>
+                <button class="panel-collapse" data-side="left" aria-label="Contraer panel" title="Contraer panel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+            </div>
+            <div class="panel-body" id="info-body"></div>
+        </div>
+
+        <div class="sim-panel glass-panel hud-corners" id="controls-container">
+            <div class="panel-header">
+                <button class="panel-collapse" data-side="right" aria-label="Contraer panel" title="Contraer panel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                <span class="panel-badge">CTRL</span>
+                <span class="panel-title">Parámetros</span>
+            </div>
+            <div class="panel-body" id="controls-body"></div>
+        </div>
+    </div>
+
+    <button class="panel-reveal-tab left" id="reveal-left" aria-label="Mostrar panel de información" title="Mostrar información">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="panel-reveal-tab right" id="reveal-right" aria-label="Mostrar panel de parámetros" title="Mostrar parámetros">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+</div>
+
+<div id="pl-error"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   CÓDIGO DEL MÓDULO (librerías + clase de la escena, sin import/export)
+   Va encapsulado en una IIFE para que sus nombres no choquen con el arnés.
+   ═════════════════════════════════════════════════════════════════════════════ */
+const SceneClass = (() => {
+// ── Pulso compartido: cabeza brillante + estela ──
+const PULSE_GLSL = /* glsl */`
+    float flowPulse(float phase) {
+        // phase ∈ [0,1): 1 = cabeza del cometa, 0 = cola
+        return pow(phase, 4.0);
+    }
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LÍNEAS (THREE.Line)
+// ─────────────────────────────────────────────────────────────────────────────
+const lineVert = /* glsl */`
+    attribute vec3 color;     // color por magnitud (ya lo calcula la escena)
+    attribute float aDist;    // longitud de arco acumulada en unidades de mundo
+    varying vec3 vColor;
+    varying float vDist;
+    void main() {
+        vColor = color;
+        vDist  = aDist;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const lineFrag = /* glsl */`
+    uniform float uTime, uSpeed, uK, uOpacity, uDir;
+    varying vec3 vColor;
+    varying float vDist;
+    ${PULSE_GLSL}
+    void main() {
+        float phase = fract(vDist * uK - uDir * uTime * uSpeed);
+        float head  = flowPulse(phase);
+        vec3  col   = mix(vColor, vec3(1.0), head * 0.65);  // la cabeza se aclara
+        float alpha = uOpacity * (0.40 + 0.60 * head);       // base visible + pulso
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+
+/**
+ * Material de flujo para THREE.Line. Se comparte entre todas las líneas de una
+ * escena; ajusta uDir por recálculo y uTime cada frame.
+ * @param {{opacity?:number, speed?:number, spacing?:number}} opts
+ *   spacing = distancia (unidades de mundo) entre pulsos consecutivos.
+ *   speed   = ciclos por segundo (qué tan rápido viajan los pulsos).
+ */
+function makeLineFlowMaterial(opts = {}) {
+    const { opacity = 0.85, speed = 0.85, spacing = 1.4 } = opts;
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            uTime:    { value: 0 },
+            uSpeed:   { value: speed },
+            uK:       { value: 1.0 / spacing },
+            uOpacity: { value: opacity },
+            uDir:     { value: 1 },
+        },
+        vertexShader: lineVert,
+        fragmentShader: lineFrag,
+        transparent: true,
+        depthWrite: false,
+    });
+}
+
+/**
+ * Calcula la longitud de arco acumulada (unidades de mundo) y la adjunta como
+ * atributo `aDist`. Debe llamarse tras fijar el atributo `position`.
+ */
+function addFlowDistance(geometry) {
+    const pos = geometry.getAttribute('position');
+    const n = pos.count;
+    const dist = new Float32Array(n);
+    let acc = 0;
+    for (let i = 1; i < n; i++) {
+        const dx = pos.getX(i) - pos.getX(i - 1);
+        const dy = pos.getY(i) - pos.getY(i - 1);
+        const dz = pos.getZ(i) - pos.getZ(i - 1);
+        acc += Math.sqrt(dx * dx + dy * dy + dz * dz);
+        dist[i] = acc;
+    }
+    geometry.setAttribute('aDist', new THREE.BufferAttribute(dist, 1));
+}
+
+class MultipoleExpansionScene {
+    constructor(scene, camera, controls) {
+        this.scene = scene;
+        this.camera = camera;
+        this.controls = controls;
+        
+        this.state = {
+            config: 'dipole', // 'monopole', 'dipole', 'quadrupole', 'custom'
+            viewMode: 'exact',    // 'exact', 'mono', 'dip', 'quad', 'sum'
+            a: 2.0, // separation
+            q: 1.0, // magnitude
+            gridDensity: 14,
+        };
+        
+        this.objects = [];
+        this.chargeMeshes = [];
+        this.streamlines = [];
+        
+        this.lineMat = makeLineFlowMaterial({ opacity: 0.85 });
+        
+        this.infoHTML = `
+            <div class="info-scene-title">Desarrollo Multipolar</div>
+            <div class="info-subtitle">El potencial de una distribución arbitraria de cargas se expande en términos monopolar, dipolar, cuadrupolar, etc., según la distancia al observador.</div>
+            <div id="multipole-moments" style="margin-bottom: 14px; font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--green-glow); background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; border-left: 2px solid var(--green-glow);"></div>
+            <div class="math-block" id="math-equation"></div>
+            <details class="explanation-block">
+                <summary>¿Por qué sucede?</summary>
+                <div class="content">
+                    A grandes distancias, los detalles finos de la distribución de carga se vuelven irrelevantes. Lo que importa son los momentos multipolares: la carga neta (monopolo), la separación de cargas (dipolo), la asimetría cuadrupolar, etc. Cada término decae más rápidamente que el anterior.
+                </div>
+            </details>
+            <details class="explanation-block">
+                <summary>¿Por qué esta expansión?</summary>
+                <div class="content">
+                    Es fundamental en astrofísica (campo gravitacional de planetas), química (interacciones moleculares), física nuclear y telecomunicaciones (diseño de antenas). Permite aproximar campos complejos con fórmulas analíticas manejables.
+                </div>
+            </details>
+        `;
+        
+        this.controlsHTML = `
+            <div class="controls-section">
+                <div class="control-label"><span class="control-name">Configuración</span></div>
+                <select id="mp-config" class="sci-select">
+                    <option value="monopole">Monopolo (carga neta)</option>
+                    <option value="dipole" selected>Dipolo eléctrico</option>
+                    <option value="quadrupole">Cuadrupolo lineal</option>
+                    <option value="custom">Distribución personalizada</option>
+                </select>
+            </div>
+            <div class="panel-sep"></div>
+            <div class="controls-section">
+                <div class="control-label">
+                    <span class="control-name">Separación de cargas $d$</span>
+                    <span class="control-value" id="mp-val-sep">2.0</span>
+                </div>
+                <input type="range" id="mp-slider-sep" min="0.5" max="6" step="0.5" value="2">
+            </div>
+            <div class="controls-section">
+                <div class="control-label">
+                    <span class="control-name">Magnitud de carga $q$</span>
+                    <span class="control-value" id="mp-val-q">1.0</span>
+                </div>
+                <input type="range" id="mp-slider-q" min="0.1" max="3" step="0.1" value="1">
+            </div>
+            <div class="controls-section">
+                <div class="control-label">
+                    <span class="control-name">Modo de Visualización</span>
+                    <span class="control-value" id="mp-val-terms" style="font-size: 10px; color: #ffcc00;">Campo Exacto</span>
+                </div>
+                <input type="range" id="mp-slider-terms" min="1" max="5" step="1" value="5">
+            </div>
+            <div class="controls-section">
+                <div class="control-label">
+                    <span class="control-name">Densidad de Líneas</span>
+                    <span class="control-value" id="mp-val-density">14</span>
+                </div>
+                <input type="range" id="mp-slider-density" min="4" max="30" step="2" value="14">
+            </div>
+            <div id="mp-mode-desc" style="font-size: 11px; color: #aaddff; margin-top: 6px; line-height: 1.2;">
+                El "Campo Exacto" evalúa las interacciones reales. Las opciones multipolares agrupan las cargas en el origen para aproximar el campo a distancias lejanas, por lo que fallan cerca de las cargas.
+            </div>
+            <div class="hint-text" style="font-size:10px; margin-top:8px;">(Click izq: Cambiar signo · Click der: Añadir/Borrar · Arrastrar: Mover)</div>
+        `;
+        
+        // Define 4 charges. Format: { x, y, z, q }
+        this.charges = [];
+        this.Q_total = 0;
+        this.p_vec = new THREE.Vector3();
+        this.Q_tensor = [[0,0,0], [0,0,0], [0,0,0]];
+    }
+
+    init() {
+        this.chargeMatPos = new THREE.MeshPhysicalMaterial({
+            color: 0xef4444, emissive: 0xb91c1c, emissiveIntensity: 0.5, metalness: 0.5, roughness: 0.5
+        });
+        this.chargeMatNeg = new THREE.MeshPhysicalMaterial({
+            color: 0x3b82f6, emissive: 0x1d4ed8, emissiveIntensity: 0.5, metalness: 0.5, roughness: 0.5
+        });
+
+        this.sphereGeo = new THREE.SphereGeometry(0.3, 32, 32);
+        
+        for(let i=0; i<4; i++) {
+            const mesh = new THREE.Mesh(this.sphereGeo, this.chargeMatPos);
+            this.chargeMeshes.push(mesh);
+            this.scene.add(mesh);
+            this.objects.push(mesh);
+        }
+        
+        this.updateChargePositions();
+        this.updateMultipoleMoments();
+        this.updateMath();
+        this.calculateStreamlines();
+
+    }
+
+    destroy() {
+        if (this.unbindInteractions) this.unbindInteractions();
+        this.objects.forEach(obj => this.scene.remove(obj));
+        this.objects = [];
+        this.clearStreamlines();
+        if(this.chargeMeshes.length > 0) {
+            this.chargeMeshes[0].geometry.dispose(); // Shared geometry
+            this.chargeMeshes = [];
+        }
+    }
+    
+    clearStreamlines() {
+        this.streamlines.forEach(mesh => {
+            this.scene.remove(mesh);
+            mesh.geometry.dispose();
+        });
+        this.streamlines = [];
+    }
+
+    bindUI() {
+        this.bindInteractions();
+        
+        const configEl = document.getElementById('mp-config');
+        if (configEl) configEl.addEventListener('change', (e) => {
+            this.state.config = e.target.value;
+            this.updateChargePositions();
+            this.updateMultipoleMoments();
+            this.updateMath();
+            this.calculateStreamlines();
+        });
+        
+        const sepEl = document.getElementById('mp-slider-sep');
+        if (sepEl) sepEl.addEventListener('input', (e) => {
+            this.state.a = parseFloat(e.target.value);
+            document.getElementById('mp-val-sep').innerText = this.state.a.toFixed(1);
+            if (this.state.config !== 'custom') this.updateChargePositions();
+            this.updateMultipoleMoments();
+            this.calculateStreamlines();
+        });
+        
+        const qEl = document.getElementById('mp-slider-q');
+        if (qEl) qEl.addEventListener('input', (e) => {
+            this.state.q = parseFloat(e.target.value);
+            document.getElementById('mp-val-q').innerText = this.state.q.toFixed(1);
+            if (this.state.config !== 'custom') this.updateChargePositions();
+            this.updateMultipoleMoments();
+            this.calculateStreamlines();
+        });
+        
+        const termsEl = document.getElementById('mp-slider-terms');
+        if (termsEl) termsEl.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            const modes = ['exact', 'mono', 'dip', 'quad', 'sum'];
+            const modeNames = ['Solo Monopolo', 'Solo Dipolo', 'Solo Cuadrupolo', 'Suma (Mon+Dip+Quad)', 'Campo Exacto'];
+            
+            this.state.viewMode = modes[val - 1] || 'exact';
+            
+            // Re-map value because val=1 is mono, 2=dip, 3=quad, 4=sum, 5=exact
+            if (val === 1) { this.state.viewMode = 'mono'; document.getElementById('mp-mode-desc').innerText = "Término monopolar. Aproximación válida solo a distancias muy lejanas del origen."; }
+            else if (val === 2) { this.state.viewMode = 'dip'; document.getElementById('mp-mode-desc').innerText = "Término dipolar. Las líneas no conectan las cargas porque el dipolo se evalúa como si estuviera concentrado en el origen."; }
+            else if (val === 3) { this.state.viewMode = 'quad'; document.getElementById('mp-mode-desc').innerText = "Término cuadrupolar. Aproximación matemática concentrada en el origen."; }
+            else if (val === 4) { this.state.viewMode = 'sum'; document.getElementById('mp-mode-desc').innerText = "Suma de Monopolo + Dipolo + Cuadrupolo. Sigue siendo una aproximación válida a distancias lejanas."; }
+            else { this.state.viewMode = 'exact'; document.getElementById('mp-mode-desc').innerText = "Campo Exacto. Ley de Coulomb real. Las líneas fluyen correctamente entre las cargas reales."; }
+
+            document.getElementById('mp-val-terms').innerText = modeNames[val - 1];
+            
+            this.updateMath();
+            this.calculateStreamlines();
+        });
+        
+        const densEl = document.getElementById('mp-slider-density');
+        if (densEl) densEl.addEventListener('input', (e) => {
+            this.state.gridDensity = parseInt(e.target.value);
+            document.getElementById('mp-val-density').innerText = this.state.gridDensity;
+            this.calculateStreamlines();
+        });
+    }
+
+    updateChargePositions() {
+        const a = this.state.a;
+        const q0 = this.state.q;
+        if (this.state.config === 'quadrupole') {
+            this.charges = [
+                { x: a, y: a, z: 0, q: q0 },
+                { x: -a, y: -a, z: 0, q: q0 },
+                { x: a, y: -a, z: 0, q: -q0 },
+                { x: -a, y: a, z: 0, q: -q0 }
+            ];
+        } else if (this.state.config === 'dipole') {
+            this.charges = [
+                { x: 0, y: a, z: 0, q: q0 },
+                { x: 0, y: -a, z: 0, q: -q0 }
+            ];
+        } else if (this.state.config === 'monopole') {
+            this.charges = [
+                { x: a, y: a, z: 0, q: q0 },
+                { x: -a, y: -a, z: 0, q: q0 },
+                { x: a, y: -a, z: 0, q: q0 },
+                { x: -a, y: a, z: 0, q: q0 }
+            ];
+        } else {
+            // Asymmetric
+            if (this.charges.length === 0) {
+                this.charges = [
+                    { x: a, y: a*0.5, z: 0, q: q0 * 2 },
+                    { x: -a, y: -a, z: a, q: -q0 },
+                    { x: a*0.2, y: -a, z: -a, q: q0 },
+                    { x: -a, y: a, z: 0, q: q0 }
+                ];
+            }
+        }
+        
+        while (this.chargeMeshes.length > this.charges.length) {
+            const m = this.chargeMeshes.pop();
+            this.scene.remove(m);
+            const idx = this.objects.indexOf(m);
+            if (idx > -1) this.objects.splice(idx, 1);
+        }
+        while (this.chargeMeshes.length < this.charges.length) {
+            const m = new THREE.Mesh(this.sphereGeo, this.chargeMatPos);
+            this.chargeMeshes.push(m);
+            this.scene.add(m);
+            this.objects.push(m);
+        }
+        
+        for (let i = 0; i < this.charges.length; i++) {
+            this.chargeMeshes[i].position.set(this.charges[i].x, this.charges[i].y, this.charges[i].z);
+            this.chargeMeshes[i].material = this.charges[i].q > 0 ? this.chargeMatPos : this.chargeMatNeg;
+            this.chargeMeshes[i].scale.setScalar(Math.abs(this.charges[i].q) * 0.5 + 0.5);
+        }
+    }
+
+    updateMultipoleMoments() {
+        // Monopole
+        this.Q_total = 0;
+        this.p_vec.set(0,0,0);
+        this.Q_tensor = [[0,0,0], [0,0,0], [0,0,0]];
+        
+        for (let i = 0; i < this.charges.length; i++) {
+            const c = this.charges[i];
+            this.Q_total += c.q;
+            
+            // Dipole
+            this.p_vec.x += c.q * c.x;
+            this.p_vec.y += c.q * c.y;
+            this.p_vec.z += c.q * c.z;
+            
+            // Quadrupole (Traceless)
+            const r2 = c.x*c.x + c.y*c.y + c.z*c.z;
+            const r_vec = [c.x, c.y, c.z];
+            for (let row=0; row<3; row++) {
+                for (let col=0; col<3; col++) {
+                    const delta = (row === col) ? 1 : 0;
+                    this.Q_tensor[row][col] += c.q * (3 * r_vec[row] * r_vec[col] - r2 * delta);
+                }
+            }
+        }
+    }
+
+    updateMath() {
+        let eq = `\\Phi(\\mathbf{r}) \\approx `;
+        if (this.state.viewMode === 'exact') eq = `\\mathbf{E}(\\mathbf{r}) = \\sum_{i=1}^{${this.charges.length}} \\frac{q_i}{|\\mathbf{r} - \\mathbf{r}_i|^3}(\\mathbf{r} - \\mathbf{r}_i)`;
+        else if (this.state.viewMode === 'mono') eq = `\\mathbf{E}_{mono}(\\mathbf{r}) = \\frac{Q}{r^3} \\mathbf{r}`;
+        else if (this.state.viewMode === 'dip') eq = `\\mathbf{E}_{dip}(\\mathbf{r}) = \\frac{3(\\mathbf{p}\\cdot\\hat{r})\\hat{r} - \\mathbf{p}}{r^3}`;
+        else if (this.state.viewMode === 'quad') eq = `E_{quad, i} = \\frac{5}{2r^7} (\\mathbf{r}^T \\mathbf{Q} \\mathbf{r}) r_i - \\frac{1}{r^5} (\\mathbf{Q}\\mathbf{r})_i`;
+        else eq = `\\mathbf{E} \\approx \\mathbf{E}_{mono} + \\mathbf{E}_{dip} + \\mathbf{E}_{quad}`;
+        
+        const q_t = this.Q_total.toFixed(1);
+        const p_s = `(${this.p_vec.x.toFixed(1)}, ${this.p_vec.y.toFixed(1)}, ${this.p_vec.z.toFixed(1)})`;
+        const q_tr = this.Q_tensor[0][0].toFixed(1);
+        
+        if (document.getElementById('multipole-moments')) {
+            document.getElementById('multipole-moments').innerHTML = `
+                <table style="width:100%; border-collapse: collapse;">
+                    <tr><td style="padding-bottom: 4px;">$Q_{neta}$</td><td style="text-align:right; padding-bottom: 4px;">${q_t}</td></tr>
+                    <tr><td style="padding-bottom: 4px;">$\\mathbf{p}$</td><td style="text-align:right; padding-bottom: 4px;">${p_s}</td></tr>
+                    <tr><td>$Q_{xx}$</td><td style="text-align:right;">${q_tr}</td></tr>
+                </table>
+            `;
+        }
+        
+        if (document.getElementById('math-equation')) {
+            document.getElementById('math-equation').innerHTML = `$$${eq}$$`;
+        }
+        window.renderMath();
+    }
+
+    calculateExactField(x, y, z) {
+        let fx = 0, fy = 0, fz = 0;
+        for (let i = 0; i < this.charges.length; i++) {
+            const c = this.charges[i];
+            const dx = x - c.x; const dy = y - c.y; const dz = z - c.z;
+            const distSq = dx*dx + dy*dy + dz*dz;
+            const distCube = Math.pow(distSq, 1.5) + 0.05;
+            fx += c.q * dx / distCube;
+            fy += c.q * dy / distCube;
+            fz += c.q * dz / distCube;
+        }
+        return new THREE.Vector3(fx, fy, fz);
+    }
+    
+    calculateMonoField(x, y, z, r, r3) {
+        return new THREE.Vector3(
+            this.Q_total * x / r3,
+            this.Q_total * y / r3,
+            this.Q_total * z / r3
+        );
+    }
+    
+    calculateDipField(x, y, z, r, r3, r5) {
+        const p_dot_r = this.p_vec.x * x + this.p_vec.y * y + this.p_vec.z * z;
+        return new THREE.Vector3(
+            (3 * p_dot_r * x / r5) - (this.p_vec.x / r3),
+            (3 * p_dot_r * y / r5) - (this.p_vec.y / r3),
+            (3 * p_dot_r * z / r5) - (this.p_vec.z / r3)
+        );
+    }
+    
+    calculateQuadField(x, y, z, r, r5, r7) {
+        // f = r^T Q r
+        const Q = this.Q_tensor;
+        const f = 
+            x * (Q[0][0]*x + Q[0][1]*y + Q[0][2]*z) +
+            y * (Q[1][0]*x + Q[1][1]*y + Q[1][2]*z) +
+            z * (Q[2][0]*x + Q[2][1]*y + Q[2][2]*z);
+            
+        // Qr vector
+        const qrx = Q[0][0]*x + Q[0][1]*y + Q[0][2]*z;
+        const qry = Q[1][0]*x + Q[1][1]*y + Q[1][2]*z;
+        const qrz = Q[2][0]*x + Q[2][1]*y + Q[2][2]*z;
+        
+        return new THREE.Vector3(
+            (2.5 * f * x / r7) - (qrx / r5),
+            (2.5 * f * y / r7) - (qry / r5),
+            (2.5 * f * z / r7) - (qrz / r5)
+        );
+    }
+
+    calculateField(x, y, z) {
+        const r2 = x*x + y*y + z*z;
+        const r = Math.sqrt(r2);
+        
+        if (this.state.viewMode === 'exact') {
+            return this.calculateExactField(x, y, z);
+        }
+        
+        if (r < 1.0) return new THREE.Vector3(0,0,0); // Avoid singularity at origin for multipoles
+        const r3 = r2 * r;
+        const r5 = r3 * r2;
+        const r7 = r5 * r2;
+        
+        let E = new THREE.Vector3(0,0,0);
+        
+        if (this.state.viewMode === 'mono' || this.state.viewMode === 'sum') {
+            E.add(this.calculateMonoField(x, y, z, r, r3));
+        }
+        if (this.state.viewMode === 'dip' || this.state.viewMode === 'sum') {
+            E.add(this.calculateDipField(x, y, z, r, r3, r5));
+        }
+        if (this.state.viewMode === 'quad' || this.state.viewMode === 'sum') {
+            E.add(this.calculateQuadField(x, y, z, r, r5, r7));
+        }
+        
+        return E;
+    }
+
+    traceStreamline(startPos, maxSteps, stepSize) {
+        const points = [];
+        const colors = [];
+        let currentPos = startPos.clone();
+        
+        for (let i = 0; i < maxSteps; i++) {
+            const f = this.calculateField(currentPos.x, currentPos.y, currentPos.z);
+            const mag = f.length();
+            if (mag < 0.0001) break;
+            
+            points.push(currentPos.x, currentPos.y, currentPos.z);
+            
+            const s = Math.min(Math.max(Math.log10(mag * 50) * 0.4, 0.0), 1.0);
+            const c = new THREE.Color().setHSL(0.6 - s*0.6, 1.0, 0.5);
+            colors.push(c.r, c.g, c.b);
+            
+            const k1 = f.clone().normalize().multiplyScalar(stepSize);
+            const p2 = currentPos.clone().add(k1.clone().multiplyScalar(0.5));
+            const k2 = this.calculateField(p2.x, p2.y, p2.z).normalize().multiplyScalar(stepSize);
+            const p3 = currentPos.clone().add(k2.clone().multiplyScalar(0.5));
+            const k3 = this.calculateField(p3.x, p3.y, p3.z).normalize().multiplyScalar(stepSize);
+            const p4 = currentPos.clone().add(k3);
+            const k4 = this.calculateField(p4.x, p4.y, p4.z).normalize().multiplyScalar(stepSize);
+            
+            const step = new THREE.Vector3(
+                (k1.x + 2*k2.x + 2*k3.x + k4.x) / 6,
+                (k1.y + 2*k2.y + 2*k3.y + k4.y) / 6,
+                (k1.z + 2*k2.z + 2*k3.z + k4.z) / 6
+            );
+            
+            currentPos.add(step);
+            
+            if (currentPos.length() > 25) break;
+            
+            // Stop if getting too close to any negative charge (or any charge)
+            let tooClose = false;
+            for(let ch of this.charges) {
+                if(currentPos.distanceTo(new THREE.Vector3(ch.x, ch.y, ch.z)) < 0.2) {
+                    tooClose = true; break;
+                }
+            }
+            if(tooClose && i > 5) break;
+        }
+        return { points, colors };
+    }
+
+    calculateStreamlines() {
+        this.clearStreamlines();
+        
+        // Find seed charges (positive ones)
+        let seedCharges = this.charges.filter(c => c.q > 0);
+        if (seedCharges.length === 0) seedCharges = this.charges; // fallback
+        
+        const linesPerCharge = this.state.gridDensity;
+        const stepSize = 0.2;
+        const maxSteps = 300;
+        
+        const phiStep = Math.PI * (3 - Math.sqrt(5));
+        
+        for (const ch of seedCharges) {
+            const chargePos = new THREE.Vector3(ch.x, ch.y, ch.z);
+            const rSeed = 0.3; // start just outside the charge mesh
+            
+            for (let i = 0; i < linesPerCharge; i++) {
+                const y = 1 - (i / (linesPerCharge - 1)) * 2; 
+                const radiusAtY = Math.sqrt(1 - y * y);
+                const theta = phiStep * i;
+                
+                const x = Math.cos(theta) * radiusAtY;
+                const z = Math.sin(theta) * radiusAtY;
+                
+                const startPos = chargePos.clone().add(new THREE.Vector3(x * rSeed, y * rSeed, z * rSeed));
+                
+                const { points, colors } = this.traceStreamline(startPos, maxSteps, stepSize);
+                
+                if (points.length > 5) {
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+                    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                    addFlowDistance(geometry);
+
+                    const line = new THREE.Line(geometry, this.lineMat);
+                    this.scene.add(line);
+                    this.streamlines.push(line);
+                }
+            }
+        }
+    }
+
+    bindInteractions() {
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.dragPlane = new THREE.Plane();
+        this.dragOffset = new THREE.Vector3();
+        this.draggingMesh = null;
+        this.isDragging = false;
+        
+        const dom = this.controls.domElement;
+        
+        this.onPointerDown = (e) => {
+            if (this.state.config !== 'custom') return;
+            const rect = dom.getBoundingClientRect();
+            this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            
+            if (e.button === 2) { // Right click
+                const intersects = this.raycaster.intersectObjects(this.chargeMeshes);
+                if (intersects.length > 0) {
+                    const mesh = intersects[0].object;
+                    const index = this.chargeMeshes.indexOf(mesh);
+                    if (index > -1) {
+                        this.scene.remove(mesh);
+                        const objIdx = this.objects.indexOf(mesh);
+                        if (objIdx > -1) this.objects.splice(objIdx, 1);
+                        this.chargeMeshes.splice(index, 1);
+                        this.charges.splice(index, 1);
+                        
+                        this.updateMultipoleMoments();
+                        this.updateMath();
+                        this.calculateStreamlines();
+                    }
+                } else {
+                    const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
+                    const target = new THREE.Vector3();
+                    if (this.raycaster.ray.intersectPlane(plane, target)) {
+                        const newQ = 1;
+                        this.charges.push({ x: target.x, y: target.y, z: target.z, q: newQ });
+                        
+                        const mesh = new THREE.Mesh(this.sphereGeo, this.chargeMatPos);
+                        mesh.position.copy(target);
+                        this.chargeMeshes.push(mesh);
+                        this.scene.add(mesh);
+                        this.objects.push(mesh);
+                        
+                        this.updateChargePositions();
+                        this.updateMultipoleMoments();
+                        this.updateMath();
+                        this.calculateStreamlines();
+                    }
+                }
+                return;
+            }
+            
+            if (e.button === 0) { // Left click
+                const intersects = this.raycaster.intersectObjects(this.chargeMeshes);
+                if (intersects.length > 0) {
+                    this.draggingMesh = intersects[0].object;
+                    this.controls.enabled = false;
+                    
+                    const normal = new THREE.Vector3().subVectors(this.camera.position, this.draggingMesh.position).normalize();
+                    this.dragPlane.setFromNormalAndCoplanarPoint(normal, this.draggingMesh.position);
+                    
+                    const target = new THREE.Vector3();
+                    if (this.raycaster.ray.intersectPlane(this.dragPlane, target)) {
+                        this.dragOffset.copy(target).sub(this.draggingMesh.position);
+                    }
+                    this.isDragging = false; 
+                }
+            }
+        };
+        
+        this.onPointerMove = (e) => {
+            if (!this.draggingMesh) return;
+            this.isDragging = true;
+            
+            const rect = dom.getBoundingClientRect();
+            this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            
+            const target = new THREE.Vector3();
+            if (this.raycaster.ray.intersectPlane(this.dragPlane, target)) {
+                this.draggingMesh.position.copy(target).sub(this.dragOffset);
+                const idx = this.chargeMeshes.indexOf(this.draggingMesh);
+                if (idx > -1) {
+                    this.charges[idx].x = this.draggingMesh.position.x;
+                    this.charges[idx].y = this.draggingMesh.position.y;
+                    this.charges[idx].z = this.draggingMesh.position.z;
+                    this.updateMultipoleMoments();
+                }
+            }
+        };
+        
+        this.onPointerUp = (e) => {
+            if (e.button === 0 && this.draggingMesh) {
+                if (!this.isDragging) {
+                    // Toggle sign
+                    const idx = this.chargeMeshes.indexOf(this.draggingMesh);
+                    if (idx > -1) {
+                        this.charges[idx].q *= -1;
+                        this.draggingMesh.material = this.charges[idx].q > 0 ? this.chargeMatPos : this.chargeMatNeg;
+                    }
+                }
+                this.draggingMesh = null;
+                this.controls.enabled = true;
+                this.isDragging = false;
+                
+                this.updateMultipoleMoments();
+                this.updateMath();
+                this.calculateStreamlines();
+            }
+        };
+        
+        this.onContextMenu = (e) => {
+            if (this.state.config === 'custom') {
+                e.preventDefault();
+            }
+        };
+        
+        dom.addEventListener('pointerdown', this.onPointerDown);
+        dom.addEventListener('pointermove', this.onPointerMove);
+        dom.addEventListener('pointerup', this.onPointerUp);
+        dom.addEventListener('contextmenu', this.onContextMenu);
+    }
+    
+    unbindInteractions() {
+        if (!this.controls) return;
+        const dom = this.controls.domElement;
+        if (this.onPointerDown) dom.removeEventListener('pointerdown', this.onPointerDown);
+        if (this.onPointerMove) dom.removeEventListener('pointermove', this.onPointerMove);
+        if (this.onPointerUp) dom.removeEventListener('pointerup', this.onPointerUp);
+        if (this.onContextMenu) dom.removeEventListener('contextmenu', this.onContextMenu);
+    }
+
+    update() {
+        this.lineMat.uniforms.uTime.value = performance.now() * 0.001;
+    }
+}
+
+return MultipoleExpansionScene;
+})();
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   ARNÉS — réplica reducida de helmholtz-sim/main.js (no editar por módulo)
+   Contrato de escena: new SceneClass(scene, camera, controls, renderer)
+   → infoHTML, controlsHTML, init(), bindUI?(), update?(), render?(), destroy()
+   ═════════════════════════════════════════════════════════════════════════════ */
+const infoBody     = document.getElementById('info-body');
+const controlsBody = document.getElementById('controls-body');
+
+window.renderMath = function () {
+    const opts = {
+        delimiters: [
+            { left: '$$', right: '$$', display: true  },
+            { left: '$',  right: '$',  display: false },
+        ],
+        strict: (code) => (code === 'newLineInDisplayMode' ? 'ignore' : 'warn'),
+    };
+    if (window.renderMathInElement) {
+        window.renderMathInElement(infoBody,     opts);
+        window.renderMathInElement(controlsBody, opts);
+    }
+};
+
+function showError(msg) {
+    const el = document.getElementById('pl-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+}
+
+const container = document.getElementById('canvas-container');
+const scene     = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x040d08, 0.045);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(10, 8, 15);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setClearColor(0x040d08, 1);
+container.appendChild(renderer.domElement);
+
+// Resolución adaptativa (un solo sentido: baja si el frame pasa de ~21 ms)
+const DPR_MAX = Math.min(window.devicePixelRatio || 1, 1.75);
+const DPR_MIN = 0.7;
+let dpr = DPR_MAX;
+function applyResolution() {
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+applyResolution();
+const QUAL = { frames: 0, acc: 0, warmup: 0, WINDOW: 60, WARMUP: 90 };
+function sampleFrame(dt) {
+    if (dt <= 0 || dt > 500) return;
+    if (QUAL.warmup < QUAL.WARMUP) { QUAL.warmup++; return; }
+    QUAL.acc += dt;
+    if (++QUAL.frames < QUAL.WINDOW) return;
+    const avg = QUAL.acc / QUAL.frames;
+    QUAL.frames = 0; QUAL.acc = 0;
+    if (avg > 21 && dpr > DPR_MIN) { dpr = Math.max(DPR_MIN, dpr - 0.15); applyResolution(); }
+}
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping   = true;
+controls.autoRotate      = true;
+controls.autoRotateSpeed = 0.4;
+
+scene.add(new THREE.AmbientLight(0x00ff88, 0.3));
+const dirLight = new THREE.DirectionalLight(0x00ff88, 0.8);
+dirLight.position.set(10, 20, 10);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0x004422, 0.5);
+fillLight.position.set(-10, -5, -10);
+scene.add(fillLight);
+const gridHelper = new THREE.GridHelper(120, 120, 0x003322, 0x001a11);
+gridHelper.position.y = -5;
+scene.add(gridHelper);
+
+// Paneles contraíbles (de ui_chrome.js)
+(function () {
+    const infoP = document.getElementById('info-container');
+    const ctrlP = document.getElementById('controls-container');
+    const tabL  = document.getElementById('reveal-left');
+    const tabR  = document.getElementById('reveal-right');
+    function setCollapsed(panel, tab, collapsed) {
+        panel.classList.toggle('collapsed', collapsed);
+        tab.classList.toggle('show', collapsed);
+    }
+    document.querySelectorAll('.panel-collapse').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (btn.getAttribute('data-side') === 'left') setCollapsed(infoP, tabL, true);
+            else setCollapsed(ctrlP, tabR, true);
+        });
+    });
+    tabL.addEventListener('click', () => setCollapsed(infoP, tabL, false));
+    tabR.addEventListener('click', () => setCollapsed(ctrlP, tabR, false));
+})();
+
+let currentScene = null;
+try {
+    currentScene = new SceneClass(scene, camera, controls, renderer);
+    window.__plScene = currentScene;
+    infoBody.innerHTML     = currentScene.infoHTML     || '';
+    controlsBody.innerHTML = currentScene.controlsHTML || '';
+    currentScene.init();
+    if (currentScene.bindUI) currentScene.bindUI();
+    try {
+        renderer.compile(scene, camera);
+        if (currentScene.render) currentScene.render();
+        else renderer.render(scene, camera);
+    } catch (err) {
+        console.warn('[PhysicsLab] Pre-compilación de shaders falló:', err);
+    }
+    window.renderMath();
+    // KaTeX llega por CDN con defer: si aún no estaba, re-renderizar al cargar todo.
+    if (!window.renderMathInElement) window.addEventListener('load', () => window.renderMath());
+} catch (err) {
+    console.error('[PhysicsLab] Error iniciando el módulo:', err);
+    showError('No se pudo iniciar la simulación.\n\n' + (err && err.message ? err.message : err) +
+        '\n\n¿Hay conexión a internet? three.js y KaTeX se cargan desde CDN.');
+    currentScene = null;
+}
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        applyResolution();
+    }, 120);
+});
+
+let prev = 0, updateErrLogged = false, renderErrLogged = false;
+function animate(now) {
+    requestAnimationFrame(animate);
+    if (prev) sampleFrame(now - prev);
+    prev = now;
+    controls.update();
+    try {
+        if (currentScene && currentScene.update) currentScene.update();
+    } catch (err) {
+        if (!updateErrLogged) { updateErrLogged = true; console.error('[PhysicsLab] Error en update():', err); }
+    }
+    try {
+        if (currentScene && currentScene.render) currentScene.render();
+        else renderer.render(scene, camera);
+    } catch (err) {
+        if (!renderErrLogged) { renderErrLogged = true; console.error('[PhysicsLab] Error en render():', err); }
+    }
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

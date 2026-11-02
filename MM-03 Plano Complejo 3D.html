@@ -1,0 +1,2634 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MM-03 El Plano Complejo en 3D — PhysicsLab</title>
+<!-- PhysicsLab · módulo independiente (generado desde helmholtz-sim/scenes).
+     Necesita conexión a internet: three.js (unpkg), KaTeX (jsdelivr) y fuentes (Google Fonts). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<style>
+/* ── Subconjunto de helmholtz-sim/style.css (pantalla de simulación) ── */
+:root {
+    /* Acento de la UI como triplete RGB → permite cambiar de tema en un solo lugar */
+    --acc: 0, 255, 136;
+    --green-glow:   #00ff88;
+    --green-mid:    #00cc66;
+    --green-dim:    #007744;
+    --green-tint:   rgba(var(--acc), 0.06);
+    --green-border: rgba(var(--acc), 0.25);
+    --green-border-bright: rgba(var(--acc), 0.55);
+    --teal:         #00e5cc;
+    --bg-base:      #040d08;
+    --bg-panel:     rgba(5, 20, 12, 0.80);
+    --bg-card:      rgba(var(--acc), 0.04);
+    --text-primary: #e0ffe8;
+    --text-secondary: rgba(180, 255, 210, 0.65);
+    --text-dim:     rgba(120, 200, 150, 0.45);
+    --scan-color:   rgba(var(--acc), 0.03);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Rajdhani', sans-serif;
+}
+
+/* ── Scanline overlay ── */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        var(--scan-color) 3px,
+        var(--scan-color) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+}
+
+/* ── Utility ── */
+.font-orbitron { font-family: 'Orbitron', monospace; }
+.font-mono     { font-family: 'Share Tech Mono', monospace; }
+
+/* =============================================
+   BARRA DE DESPLAZAMIENTO PERSONALIZADA
+   (usa --acc → se adapta a los 4 temas)
+   ============================================= */
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--acc), 0.55) transparent;
+}
+
+/* WebKit / Chromium / Edge */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(var(--acc), 0.04);
+    border-radius: 10px;
+    margin: 4px;
+}
+::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    /* riel de cristal con glow del color de acento */
+    background:
+        linear-gradient(180deg,
+            rgba(var(--acc), 0.65) 0%,
+            rgba(var(--acc), 0.40) 50%,
+            rgba(var(--acc), 0.65) 100%);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.30),
+        0 0 8px rgba(var(--acc), 0.35);
+    transition: background 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+    background:
+        linear-gradient(180deg,
+            rgba(var(--acc), 0.95) 0%,
+            rgba(var(--acc), 0.70) 50%,
+            rgba(var(--acc), 0.95) 100%);
+    background-clip: padding-box;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.45),
+        0 0 14px rgba(var(--acc), 0.60);
+}
+::-webkit-scrollbar-thumb:active {
+    background: rgb(var(--acc));
+    background-clip: padding-box;
+}
+/* sin flechas arriba/abajo */
+::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* =============================================
+   GLASS PANEL
+   ============================================= */
+.glass-panel {
+    background: transparent;
+    backdrop-filter: blur(32px) saturate(220%);
+    -webkit-backdrop-filter: blur(32px) saturate(220%);
+    border: 1px solid rgba(var(--acc), 0.3);
+    border-radius: 16px;
+    box-shadow:
+        0 8px 32px 0 rgba(var(--acc), 0.1),
+        inset 0 2px 8px 0 rgba(var(--acc), 0.4),
+        inset 0 -1px 2px 0 rgba(var(--acc), 0.1);
+    position: relative;
+    /* overflow lo define cada elemento que lo necesite:
+       .sim-panel → overflow-y:auto (scroll)
+       .ai-chat-panel / .exp-card → overflow:hidden (clip propio) */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel:hover {
+    background: transparent;
+    border-color: rgba(var(--acc), 0.6);
+    box-shadow:
+        0 12px 40px 0 rgba(var(--acc), 0.25),
+        inset 0 3px 12px 0 rgba(var(--acc), 0.5),
+        inset 0 -1px 4px 0 rgba(var(--acc), 0.2);
+    transform: translateY(-2px);
+}
+
+.glass-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(var(--acc),0.15) 0%, transparent 40%, rgba(var(--acc),0.05) 100%);
+    pointer-events: none;
+    border-radius: 16px;
+    transition: background 0.3s;
+}
+
+.glass-panel:hover::before {
+    background: linear-gradient(135deg, rgba(var(--acc),0.25) 0%, transparent 45%, rgba(var(--acc),0.08) 100%);
+}
+
+/* =============================================
+   LIQUID GLASS — reactividad al cursor
+   (tilt 3D elástico gestionado por liquid.js +
+    reflejo radial que sigue al puntero)
+   ============================================= */
+/* preserve-3d solo en las tarjetas (tilt 3D de liquid.js).
+   Los glass-panel scrollables NO lo necesitan — preserve-3d invalida overflow en algunos browsers. */
+.exp-card {
+    transform-style: preserve-3d;
+    isolation: isolate;
+}
+.glass-panel {
+    isolation: isolate;
+}
+
+/* Reflejo líquido que sigue al cursor (posición vía --mx/--my desde liquid.js) */
+.exp-card::after,
+.glass-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%),
+        rgba(var(--acc), 0.20) 0%,
+        rgba(var(--acc), 0.07) 35%,
+        transparent 62%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: -1;
+}
+.exp-card:hover::after,
+.glass-panel:hover::after {
+    opacity: 1;
+}
+
+/* HUD corner accents removed per user request */
+.hud-corners {
+    position: relative;
+}
+
+/* =============================================
+   GLOWING TEXT
+   ============================================= */
+.text-glow {
+    color: var(--green-glow);
+    text-shadow: 0 0 10px rgba(var(--acc), 0.7), 0 0 30px rgba(var(--acc), 0.3);
+}
+.text-glow-dim {
+    color: var(--green-mid);
+    text-shadow: 0 0 8px rgba(var(--acc), 0.4);
+}
+.title-gradient {
+    background: linear-gradient(135deg, var(--green-glow) 0%, var(--teal) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 8px rgba(var(--acc), 0.4));
+}
+/* Lecturas numéricas en vivo (paneles de info de las simulaciones) */
+.readout {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+}
+.readout > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc), 0.04);
+}
+.readout > div span { color: var(--text-secondary); }
+.readout > div b {
+    color: var(--green-glow);
+    font-weight: 700;
+    text-shadow: 0 0 8px rgba(var(--acc), 0.4);
+}
+
+#sim-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+}
+
+#sim-screen.active { display: block; }
+
+/* Top bar */
+.sim-topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    z-index: 30;
+    background: transparent;
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--green-border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+}
+
+.back-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 16px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc),0.05);
+    color: var(--green-glow);
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.back-btn:hover {
+    background: rgba(var(--acc),0.12);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.25);
+}
+
+.topbar-scene-name {
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--green-glow);
+    text-shadow: 0 0 8px rgba(var(--acc),0.4);
+}
+
+.topbar-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--green-border);
+}
+
+.topbar-hint {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-left: auto;
+}
+
+/* Sidebar panels */
+.sim-panels {
+    position: absolute;
+    inset: 0;
+    top: 56px;
+    z-index: 20;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 20px;
+    gap: 20px;
+    pointer-events: none;
+}
+
+.sim-panel {
+    pointer-events: auto;
+    width: 300px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    /* El marco NO scrollea: recorta. El scroll vive en .panel-body, así el
+       reflejo ::after (backlight que sigue al cursor) cubre siempre toda la
+       altura visible del panel y no se corta al deslizar el contenido. */
+    overflow: hidden;
+    border-radius: 16px;
+    padding: 20px;
+}
+.panel-body::-webkit-scrollbar { width: 6px; }
+.panel-body::-webkit-scrollbar-track { background: rgba(var(--acc), 0.06); border-radius: 6px; margin: 6px; }
+.panel-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(var(--acc), 0.7), rgba(var(--acc), 0.45));
+    border-radius: 6px;
+    box-shadow: 0 0 6px rgba(var(--acc), 0.4);
+}
+.panel-body::-webkit-scrollbar-thumb:hover { background: rgb(var(--acc)); }
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--green-border);
+    position: relative;
+    z-index: 1;
+    flex: none;   /* cabecera fija: no se encoge cuando el cuerpo scrollea */
+}
+
+.panel-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    border: 1px solid var(--green-border);
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+
+.panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-primary);
+    flex: 1;
+    text-transform: uppercase;
+}
+
+.panel-body {
+    padding: 16px 20px 28px;   /* padding-bottom extra: evita que el último item quede cortado por el border-radius */
+    position: relative;
+    z-index: 1;
+    /* Único elemento con scroll del panel (el marco queda fijo). */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--acc), 0.6) rgba(var(--acc), 0.06);
+}
+
+/* Info panel content */
+.info-scene-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--green-glow), var(--teal));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.3;
+}
+
+.info-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.math-block {
+    background: rgba(var(--acc), 0.05);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(var(--acc), 0.3);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 3px rgba(var(--acc),0.2);
+    padding: 14px;
+    margin-bottom: 14px;
+    text-align: center;
+    font-size: 16px;
+    overflow-x: auto;
+}
+
+.explanation-block {
+    background: rgba(0,0,0,0.3);
+    border-left: 2px solid var(--green-mid);
+    border-radius: 0 8px 8px 0;
+    margin-bottom: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+details.explanation-block[open] {
+    padding-bottom: 12px;
+}
+
+details.explanation-block summary {
+    padding: 12px 14px;
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    cursor: pointer;
+    outline: none;
+    list-style: none;
+    position: relative;
+    user-select: none;
+}
+
+details.explanation-block summary::-webkit-details-marker {
+    display: none;
+}
+
+details.explanation-block summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+
+details.explanation-block[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details.explanation-block div.content {
+    padding: 0 14px 4px;
+    font-size: 13.5px;
+    margin: 0;
+}
+
+/* Fórmulas inline (KaTeX) en subtítulos y explicaciones: al renderizar fracciones,
+   el alto de la fórmula supera el de la línea de texto y se recortaba por abajo.
+   Hacerlas inline-block + más interlineado reserva su altura completa en la línea,
+   evitando el recorte en TODAS las escenas. */
+.info-subtitle,
+details.explanation-block div.content {
+    line-height: 1.95;
+    overflow: visible;
+}
+.info-subtitle .katex,
+details.explanation-block div.content .katex {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.hint-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+    line-height: 1.5;
+}
+
+/* Controls panel content */
+.controls-section {
+    margin-bottom: 20px;
+}
+.controls-section:last-child { margin-bottom: 0; }
+
+.control-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.control-name {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+.control-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--green-glow);
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Custom range slider */
+input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    position: relative;
+    z-index: 10;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(var(--acc),0.12);
+    outline: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+input[type=range]:hover {
+    background: rgba(var(--acc),0.20);
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--green-glow);
+    cursor: pointer;
+    border: 2px solid var(--bg-base);
+    box-shadow: 0 0 8px rgba(var(--acc),0.6);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 15px rgba(var(--acc),0.9);
+}
+input[type=range]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+}
+input[type=range]::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--green-glow);
+    border: 2px solid var(--bg-base);
+    box-shadow: 0 0 8px rgba(var(--acc),0.6);
+    cursor: pointer;
+}
+
+/* Toggle switch */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(var(--acc),0.06);
+}
+.toggle-row:last-child { border-bottom: none; }
+
+.toggle-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toggle-dot-color {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/* Custom toggle */
+.toggle-wrap {
+    position: relative;
+    display: inline-block;
+}
+.toggle-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+/* ── Toggle "liquid glass" (gel translúcido, knob gelatinoso) ── */
+.toggle-track {
+    display: block;
+    width: 48px;
+    height: 27px;
+    border-radius: 14px;
+    background: rgba(var(--acc), 0.06);
+    backdrop-filter: blur(6px) saturate(160%);
+    -webkit-backdrop-filter: blur(6px) saturate(160%);
+    border: 1px solid rgba(var(--acc), 0.25);
+    box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.35),
+        inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+/* Reflejo superior vidrioso del riel */
+.toggle-track::before {
+    content: '';
+    position: absolute;
+    inset: 1px 1px 55% 1px;
+    border-radius: 13px 13px 8px 8px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent);
+    pointer-events: none;
+}
+.toggle-wrap input:checked + .toggle-track {
+    background: linear-gradient(180deg, rgba(var(--acc), 0.50) 0%, rgba(var(--acc), 0.30) 100%);
+    border-color: rgba(var(--acc), 0.85);
+    box-shadow:
+        0 0 16px rgba(var(--acc), 0.55),
+        inset 0 1px 2px rgba(255, 255, 255, 0.45),
+        inset 0 -2px 4px rgba(var(--acc), 0.4);
+}
+
+.toggle-track .toggle-thumb {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 21px; height: 21px;
+    border-radius: 8px;                 /* squircle tipo gel, no círculo perfecto */
+    transform-origin: left center;       /* el estiramiento sale desde el borde */
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.7) 0%, rgba(210, 245, 225, 0.32) 100%);
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.3),
+        inset 0 1px 1px rgba(255, 255, 255, 0.95),
+        inset 0 -2px 3px rgba(var(--acc), 0.15);
+    /* Easing elástico → el knob rebota como gelatina al asentarse */
+    transition: transform 0.5s cubic-bezier(0.34, 1.7, 0.5, 1),
+                background 0.3s, box-shadow 0.3s, border-radius 0.3s;
+}
+.toggle-wrap input:checked + .toggle-track .toggle-thumb {
+    transform: translateX(21px);
+    border-radius: 8px;
+    background: linear-gradient(160deg, rgba(245, 255, 250, 0.75) 0%, rgba(var(--acc), 0.4) 100%);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.25),
+        inset 0 1px 1px rgba(255, 255, 255, 0.95);
+}
+
+/* Squish gelatinoso mientras se presiona: el knob se estira a lo ancho */
+.toggle-track:active .toggle-thumb {
+    transform: scaleX(1.45);
+    border-radius: 9px;
+}
+.toggle-wrap input:checked + .toggle-track:active .toggle-thumb {
+    transform: translateX(11px) scaleX(1.45);
+}
+
+/* ── Capa líquida gooey (inyectada por toggle.js) ── */
+.toggle-goo {
+    position: absolute;
+    inset: 0;
+    filter: url(#pl-liquid-goo);   /* funde barra + blob como metaball */
+    pointer-events: none;
+}
+/* "Tubo" líquido horizontal: el blob siempre se funde con él */
+.toggle-fill {
+    position: absolute;
+    left: 5px; right: 5px;
+    top: 50%;
+    height: 10px;
+    transform: translateY(-50%);
+    border-radius: 5px;
+    background: rgba(150, 170, 160, 0.85);
+    transition: background 0.3s;
+}
+/* Blob viajero (gota que se estira con el knob) */
+.toggle-blob {
+    position: absolute;
+    top: 4px; left: 4px;
+    width: 19px; height: 19px;
+    border-radius: 50%;
+    transform-origin: left center;
+    background: rgba(170, 190, 180, 0.92);
+    transition: transform 0.5s cubic-bezier(0.34, 1.7, 0.5, 1), background 0.3s;
+}
+.toggle-wrap input:checked + .toggle-track .toggle-fill {
+    background: rgba(var(--acc), 0.95);
+}
+.toggle-wrap input:checked + .toggle-track .toggle-blob {
+    transform: translateX(21px);
+    background: rgba(var(--acc), 0.97);
+}
+/* Squish gelatinoso del blob, sincronizado con el knob */
+.toggle-track:active .toggle-blob {
+    transform: scaleX(1.45);
+}
+.toggle-wrap input:checked + .toggle-track:active .toggle-blob {
+    transform: translateX(11px) scaleX(1.45);
+}
+
+/* El knob de vidrio queda por encima como brillo, semitranslúcido */
+.toggle-track .toggle-thumb {
+    z-index: 1;
+}
+
+/* Generic button */
+.sci-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border: 1px solid var(--green-border);
+    border-radius: 6px;
+    background: rgba(var(--acc),0.05);
+    color: var(--green-glow);
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+}
+.sci-btn:hover {
+    background: rgba(var(--acc),0.12);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.2);
+}
+.sci-btn:active { transform: scale(0.98); }
+
+.sci-btn.active {
+    background: rgba(var(--acc),0.20);
+    border-color: var(--green-glow);
+    box-shadow: 0 0 15px rgba(var(--acc),0.3);
+}
+
+/* Dropdown select — estilo unificado para TODOS los <select> del proyecto */
+.sci-select {
+    width: 100%;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--green-border);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2300ffaa' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px 6px;
+    padding-right: 28px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sci-select:hover {
+    border-color: var(--green-glow);
+    box-shadow: 0 0 8px rgba(var(--acc),0.15);
+}
+.sci-select:focus {
+    border-color: var(--green-glow);
+    box-shadow: 0 0 12px rgba(var(--acc),0.25);
+}
+.sci-select option {
+    background: #0a0f0d;
+    color: var(--text-primary);
+    font-family: 'Share Tech Mono', monospace;
+    padding: 6px 10px;
+}
+
+/* Separator */
+.panel-sep {
+    height: 1px;
+    background: var(--green-border);
+    margin: 16px 0;
+    opacity: 0.5;
+}
+
+/* ── KaTeX overrides ── */
+.katex { color: var(--green-glow) !important; font-size: 0.95em !important; }
+.katex .mord, .katex .mrel, .katex .mbin { color: var(--green-glow) !important; }
+.katex-display { margin: 0 !important; }
+/* Red de seguridad: si una ecuación (matrices grandes, fórmulas con \qquad) es
+   más ancha que el panel, que scrollee horizontalmente en vez de quedar
+   recortada por el overflow-x:hidden de .panel-body (ver comentario ahí). */
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    padding-bottom: 4px;   /* espacio para que la barra de scroll no tape el glyph */
+}
+
+#sim-screen { transition: opacity 0.4s ease; opacity: 0; }
+#sim-screen.active { opacity: 1; }
+
+/* =============================================
+   MOTION LAYER — entrance & micro-interactions
+   (coherente con el sistema sci-fi verde)
+   NOTA: las animaciones de entrada usan fill-mode
+   `backwards` —no `forwards`— para no congelar los
+   transform de los :hover ya existentes.
+   ============================================= */
+
+/* ── Keyframes reutilizables ── */
+@keyframes fadeIn        { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeSlideUp   { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes headerDrop    { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }
+@keyframes panelInLeft   { from { opacity: 0; transform: translateX(-44px); } to { opacity: 1; transform: none; } }
+@keyframes panelInRight  { from { opacity: 0; transform: translateX(44px);  } to { opacity: 1; transform: none; } }
+@keyframes cardEnter     { from { opacity: 0; transform: translateY(28px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+/* CRT flicker muy sutil sobre las scanlines globales */
+body::after { animation: crtFlicker 7s ease-in-out infinite; }
+@keyframes crtFlicker {
+    0%, 100% { opacity: 1; }
+    48%      { opacity: 0.93; }
+    50%      { opacity: 0.86; }
+    52%      { opacity: 0.95; }
+}
+/* ── SIM: paneles y topbar entran al activar la escena ── */
+#sim-screen.active .sim-topbar {
+    animation: headerDrop 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s backwards;
+}
+#sim-screen.active #info-container {
+    animation: panelInLeft 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.22s backwards;
+}
+#sim-screen.active #controls-container {
+    animation: panelInRight 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.22s backwards;
+}
+
+/* Contenido inyectado en los paneles: cascada al cargar cada escena */
+#info-body > *, #controls-body > * { animation: fadeSlideUp 0.45s ease backwards; }
+#info-body > *:nth-child(1), #controls-body > *:nth-child(1) { animation-delay: 0.05s; }
+#info-body > *:nth-child(2), #controls-body > *:nth-child(2) { animation-delay: 0.10s; }
+#info-body > *:nth-child(3), #controls-body > *:nth-child(3) { animation-delay: 0.15s; }
+#info-body > *:nth-child(4), #controls-body > *:nth-child(4) { animation-delay: 0.20s; }
+#info-body > *:nth-child(5), #controls-body > *:nth-child(5) { animation-delay: 0.25s; }
+#info-body > *:nth-child(6), #controls-body > *:nth-child(6) { animation-delay: 0.30s; }
+#info-body > *:nth-child(7), #controls-body > *:nth-child(7) { animation-delay: 0.35s; }
+#info-body > *:nth-child(n+8), #controls-body > *:nth-child(n+8) { animation-delay: 0.40s; }
+
+/* ── Microinteracciones de controles ── */
+.back-btn:active { transform: scale(0.96); }
+
+/* Estados de foco accesibles (teclado) coherentes con el glow verde */
+.sci-btn:focus-visible,
+.back-btn:focus-visible {
+    outline: none;
+    border-color: var(--green-glow);
+    box-shadow: 0 0 0 2px rgba(var(--acc), 0.35), 0 0 16px rgba(var(--acc), 0.3);
+}
+/* ══════════════════════════════════════════════
+   PANELES CONTRAÍBLES (deslizan fuera de pantalla)
+   ══════════════════════════════════════════════ */
+.sim-panel {
+    /* Estado base explícito (translateX(0), no `none`): así el colapso
+       interpola limpio en ambos sentidos. Transicionar desde/hacia `none`
+       deja el transform pegado en algunos motores. */
+    transform: translateX(0);
+    transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.4s ease;
+    will-change: transform;
+}
+/* !important: gana sobre la animación de entrada (panelInLeft/Right), que
+   mantiene el control de `transform` mientras la escena está activa. */
+#info-container.collapsed {
+    transform: translateX(-120%) !important;
+    opacity: 0;
+    pointer-events: none;
+}
+#controls-container.collapsed {
+    transform: translateX(120%) !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Botón de contraer en la cabecera del panel */
+.panel-collapse {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--green-border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--green-mid);
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+}
+.panel-collapse:hover {
+    border-color: var(--green-glow);
+    color: var(--green-glow);
+    background: rgba(var(--acc), 0.12);
+}
+.panel-collapse:active { transform: scale(0.9); }
+
+/* Pestañas fijas para reabrir un panel contraído */
+.panel-reveal-tab {
+    position: fixed;
+    top: 50%;
+    z-index: 25;
+    width: 24px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--green-border);
+    background: rgba(var(--acc), 0.06);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--green-glow);
+    cursor: pointer;
+    box-shadow: 0 0 14px rgba(var(--acc), 0.14);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.7);
+    transition: opacity 0.35s ease,
+                transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                background 0.2s ease,
+                border-color 0.2s ease;
+}
+.panel-reveal-tab.left  { left: 0;  border-left: none;  border-radius: 0 11px 11px 0; transform-origin: left center; }
+.panel-reveal-tab.right { right: 0; border-right: none; border-radius: 11px 0 0 11px; transform-origin: right center; }
+.panel-reveal-tab.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(-50%) scale(1);
+}
+.panel-reveal-tab.left.show:hover  { background: rgba(var(--acc), 0.16); border-color: var(--green-glow); transform: translateY(-50%) translateX(3px) scale(1); }
+.panel-reveal-tab.right.show:hover { background: rgba(var(--acc), 0.16); border-color: var(--green-glow); transform: translateY(-50%) translateX(-3px) scale(1); }
+
+
+#sim-screen .glass-panel,
+#labkit-panel,
+#labguide-panel {
+    backdrop-filter: blur(14px) saturate(200%);
+    -webkit-backdrop-filter: blur(14px) saturate(200%);
+}
+
+/* El hover de .glass-panel repinta sombras grandes sobre el canvas animado.
+   En la pantalla de simulación se queda el cambio de borde, que es gratis. */
+#sim-screen .glass-panel:hover {
+    box-shadow:
+        0 8px 32px 0 rgba(var(--acc), 0.1),
+        inset 0 2px 8px 0 rgba(var(--acc), 0.4),
+        inset 0 -1px 2px 0 rgba(var(--acc), 0.1);
+    transform: none;
+}
+/* Respeta la preferencia del sistema: sin animaciones de fondo ni blur pesado. */
+@media (prefers-reduced-motion: reduce) {
+    #sim-screen .glass-panel,
+    #labkit-panel,
+    #labguide-panel {
+        backdrop-filter: blur(8px) saturate(180%);
+        -webkit-backdrop-filter: blur(8px) saturate(180%);
+    }
+}
+
+/* ── Ajustes del módulo independiente ── */
+#sim-screen { display: block; opacity: 1; }
+.topbar-module-tag {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--green-glow);
+    text-shadow: 0 0 8px rgba(var(--acc), 0.5);
+}
+#pl-error {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 100; max-width: 460px; padding: 18px 22px;
+    font: 14px 'Share Tech Mono', monospace; color: #ffb3b3;
+    background: rgba(30, 6, 6, 0.92); border: 1px solid rgba(255, 90, 90, 0.5);
+    border-radius: 10px; display: none; white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+
+<div id="sim-screen" class="active">
+    <div id="canvas-container" style="position:absolute;inset:0;z-index:0;"></div>
+
+    <div class="sim-topbar">
+        <span class="topbar-module-tag">PHYSICSLAB</span>
+        <div class="topbar-divider"></div>
+        <span class="topbar-scene-name" id="topbar-scene-name">MM-03 — EL PLANO COMPLEJO EN 3D</span>
+        <span class="topbar-hint">[ CLICK + DRAG: ROTAR ] [ SCROLL: ZOOM ] [ SHIFT+DRAG: PAN ]</span>
+    </div>
+
+    <div class="sim-panels">
+        <div class="sim-panel glass-panel hud-corners" id="info-container">
+            <div class="panel-header">
+                <span class="panel-badge">INFO</span>
+                <span class="panel-title">Fundamento Físico</span>
+                <button class="panel-collapse" data-side="left" aria-label="Contraer panel" title="Contraer panel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+            </div>
+            <div class="panel-body" id="info-body"></div>
+        </div>
+
+        <div class="sim-panel glass-panel hud-corners" id="controls-container">
+            <div class="panel-header">
+                <button class="panel-collapse" data-side="right" aria-label="Contraer panel" title="Contraer panel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                <span class="panel-badge">CTRL</span>
+                <span class="panel-title">Parámetros</span>
+            </div>
+            <div class="panel-body" id="controls-body"></div>
+        </div>
+    </div>
+
+    <button class="panel-reveal-tab left" id="reveal-left" aria-label="Mostrar panel de información" title="Mostrar información">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="panel-reveal-tab right" id="reveal-right" aria-label="Mostrar panel de parámetros" title="Mostrar parámetros">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+</div>
+
+<div id="pl-error"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   CÓDIGO DEL MÓDULO (librerías + clase de la escena, sin import/export)
+   Va encapsulado en una IIFE para que sus nombres no choquen con el arnés.
+   ═════════════════════════════════════════════════════════════════════════════ */
+const SceneClass = (() => {
+/* =============================================================================
+   PARSER DE FUNCIONES COMPLEJAS → GLSL  (MM-02 — El Plano Complejo en 3D)
+   -----------------------------------------------------------------------------
+   Traduce una expresión matemática escrita por el usuario ("sin(z) + t*z^2")
+   a una expresión GLSL sobre vec2 (z = x + iy ≡ vec2(x, y)), según el diseño
+   de TECHNICAL_DESIGN.md §2.1 y DEVELOPER_HANDBOOK.md §3.
+
+   • El cálculo de f(z) en tiempo real NUNCA sucede en JavaScript (regla de
+     AGENT_INSTRUCTIONS.md §3): aquí solo se genera el string GLSL una vez por
+     edición. El evaluador JS incluido sirve únicamente para el inspector de
+     cursor (un punto por evento de puntero, no por vértice).
+   • Optimización (PERFORMANCE_GUIDE.md §2.3): potencias enteras |n| ≤ 8 se
+     emiten como multiplicaciones sucesivas (c_ipow) en vez de exp(w·ln z),
+     y los subárboles constantes se pliegan a un literal vec2 en JS.
+
+   Fórmulas de la librería GLSL: RESEARCH_BOOK.md §3 (identidades estándar);
+   Γ(z): aproximación de Lanczos g = 7, n = 9 (Numerical Recipes 3ª ed. §6.1),
+   con reflexión Γ(z) = π / (sin πz · Γ(1−z)) para Re(z) < 0.5.
+   ============================================================================= */
+
+'use strict';
+
+/* ── Aritmética compleja en JS (plegado de constantes + inspector) ─────────── */
+
+const CX = {
+    add: (a, b) => [a[0] + b[0], a[1] + b[1]],
+    sub: (a, b) => [a[0] - b[0], a[1] - b[1]],
+    neg: (a)    => [-a[0], -a[1]],
+    mul: (a, b) => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]],
+    div: (a, b) => {
+        const d = b[0] * b[0] + b[1] * b[1];
+        return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
+    },
+    exp: (a) => { const e = Math.exp(a[0]); return [e * Math.cos(a[1]), e * Math.sin(a[1])]; },
+    log: (a) => [Math.log(Math.hypot(a[0], a[1])), Math.atan2(a[1], a[0])],
+    pow: (a, b) => {
+        if (b[1] === 0 && Number.isInteger(b[0]) && Math.abs(b[0]) <= 64) {
+            let r = [1, 0]; const n = Math.abs(b[0]);
+            for (let k = 0; k < n; k++) r = CX.mul(r, a);
+            return b[0] < 0 ? CX.div([1, 0], r) : r;
+        }
+        return CX.exp(CX.mul(b, CX.log(a)));
+    },
+    sin:  (a) => [Math.sin(a[0]) * Math.cosh(a[1]),  Math.cos(a[0]) * Math.sinh(a[1])],
+    cos:  (a) => [Math.cos(a[0]) * Math.cosh(a[1]), -Math.sin(a[0]) * Math.sinh(a[1])],
+    tan:  (a) => CX.div(CX.sin(a), CX.cos(a)),
+    sinh: (a) => [Math.sinh(a[0]) * Math.cos(a[1]), Math.cosh(a[0]) * Math.sin(a[1])],
+    cosh: (a) => [Math.cosh(a[0]) * Math.cos(a[1]), Math.sinh(a[0]) * Math.sin(a[1])],
+    tanh: (a) => CX.div(CX.sinh(a), CX.cosh(a)),
+    sqrt: (a) => CX.pow(a, [0.5, 0]),
+    conj: (a) => [a[0], -a[1]],
+    abs:  (a) => [Math.hypot(a[0], a[1]), 0],
+    re:   (a) => [a[0], 0],
+    im:   (a) => [a[1], 0],
+    arg:  (a) => [Math.atan2(a[1], a[0]), 0],
+    gamma: (a) => {
+        // Lanczos g=7, n=9 — mismos coeficientes que la versión GLSL
+        if (a[0] < 0.5) {
+            const s = CX.sin(CX.mul([Math.PI, 0], a));
+            return CX.div([Math.PI, 0], CX.mul(s, CX.gamma(CX.sub([1, 0], a))));
+        }
+        const z = CX.sub(a, [1, 0]);
+        let x = [0.99999999999980993, 0];
+        for (let k = 0; k < 8; k++) {
+            x = CX.add(x, CX.div([LANCZOS[k], 0], CX.add(z, [k + 1, 0])));
+        }
+        const t = CX.add(z, [7.5, 0]);
+        const p = CX.pow(t, CX.add(z, [0.5, 0]));
+        return CX.mul([Math.sqrt(2 * Math.PI), 0], CX.mul(CX.mul(p, CX.exp(CX.neg(t))), x));
+    },
+    zeta: (s) => {
+        // ζ(s) por η(s) acelerada (Cohen–Villegas–Zagier) + ecuación funcional para
+        // Re(s)<0 — misma construcción que la versión GLSL (corte en Re=0). Doble
+        // precisión aquí (solo el inspector de cursor lo usa), N fijo alcanza ~ε.
+        const N = 24;
+        const rpow = (base, e) => {
+            const l = Math.log(base), m = Math.exp(e[0] * l);
+            return [m * Math.cos(e[1] * l), m * Math.sin(e[1] * l)];
+        };
+        const eta = (w) => {
+            let d = Math.pow(3 + 2 * Math.sqrt(2), N);
+            d = 0.5 * (d + 1 / d);
+            let b = -1, c = -d, sr = 0, si = 0;
+            for (let k = 0; k < N; k++) {
+                c = b - c;
+                const lr = Math.log(k + 1), mag = Math.exp(-w[0] * lr);
+                sr += c * mag * Math.cos(w[1] * lr);
+                si += c * mag * -Math.sin(w[1] * lr);
+                b = (k + N) * (k - N) / ((k + 0.5) * (k + 1)) * b;
+            }
+            return [sr / d, si / d];
+        };
+        if (s[0] >= 0) {                                   // ζ(s)=η(s)/(1−2^{1−s})
+            return CX.div(eta(s), CX.sub([1, 0], rpow(2, CX.sub([1, 0], s))));
+        }
+        const om = CX.sub([1, 0], s);                      // 1−s  (Re>1)
+        const zt = CX.div(eta(om), CX.sub([1, 0], rpow(2, s)));    // ζ(1−s)
+        let chi = CX.mul(rpow(2, s), rpow(Math.PI, CX.sub(s, [1, 0])));
+        chi = CX.mul(chi, CX.sin(CX.mul([Math.PI / 2, 0], s)));
+        chi = CX.mul(chi, CX.gamma(om));
+        return CX.mul(chi, zt);                            // ecuación funcional
+    },
+};
+
+const LANCZOS = [
+    676.5203681218851, -1259.1392167224028, 771.32342877765313,
+    -176.61502916214059, 12.507343278686905, -0.13857109526572012,
+    9.9843695780195716e-6, 1.5056327351493116e-7,
+];
+
+/* ── Librería GLSL compleja (se inyecta en vertex y fragment shaders) ──────── */
+/* Reutilizar SIEMPRE estas funciones c_*() — AGENT_INSTRUCTIONS.md §4.        */
+
+const COMPLEX_GLSL = /* glsl */`
+// ── Álgebra compleja sobre vec2 (z = x + iy) — RESEARCH_BOOK.md §3 ──────────
+const float C_PI = 3.141592653589793;
+
+vec2 c_mul(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
+vec2 c_div(vec2 a, vec2 b) { float d = dot(b, b); return vec2(dot(a, b), a.y*b.x - a.x*b.y) / d; }
+vec2 c_conj(vec2 a) { return vec2(a.x, -a.y); }
+vec2 c_exp(vec2 a)  { return exp(a.x) * vec2(cos(a.y), sin(a.y)); }
+vec2 c_log(vec2 a)  { return vec2(log(length(a)), atan(a.y, a.x)); }
+vec2 c_pow(vec2 a, vec2 b) { return c_exp(c_mul(b, c_log(a))); }
+
+// Raíz principal: √z = √r·(z+r)/|z+r|; caso real negativo aparte (z+r = 0)
+vec2 c_sqrt(vec2 a) {
+    float r = length(a);
+    if (r == 0.0) return vec2(0.0);
+    vec2 v = vec2(a.x + r, a.y);
+    float l = length(v);
+    if (l < 1e-20) return vec2(0.0, sqrt(r));
+    return sqrt(r) * v / l;
+}
+
+vec2 c_sin(vec2 a)  { return vec2(sin(a.x)*cosh(a.y),  cos(a.x)*sinh(a.y)); }
+vec2 c_cos(vec2 a)  { return vec2(cos(a.x)*cosh(a.y), -sin(a.x)*sinh(a.y)); }
+vec2 c_tan(vec2 a)  { return c_div(c_sin(a), c_cos(a)); }
+vec2 c_sinh(vec2 a) { return vec2(sinh(a.x)*cos(a.y), cosh(a.x)*sin(a.y)); }
+vec2 c_cosh(vec2 a) { return vec2(cosh(a.x)*cos(a.y), sinh(a.x)*sin(a.y)); }
+vec2 c_tanh(vec2 a) { return c_div(c_sinh(a), c_cosh(a)); }
+
+// Potencia entera |n| ≤ 8 por multiplicaciones sucesivas (PERFORMANCE_GUIDE §2.3)
+vec2 c_ipow(vec2 a, int n) {
+    int m = n < 0 ? -n : n;
+    vec2 r = vec2(1.0, 0.0);
+    for (int k = 0; k < 8; k++) {
+        if (k >= m) break;
+        r = c_mul(r, a);
+    }
+    return n < 0 ? c_div(vec2(1.0, 0.0), r) : r;
+}
+
+// Γ(z) — Lanczos g=7, n=9 (Numerical Recipes 3ª ed. §6.1)
+vec2 c_gamma_pos(vec2 zz) {
+    vec2 z = zz - vec2(1.0, 0.0);
+    vec2 x = vec2(0.99999999999980993, 0.0);
+    float C[8];
+    C[0] =  676.5203681218851;   C[1] = -1259.1392167224028;
+    C[2] =  771.32342877765313;  C[3] = -176.61502916214059;
+    C[4] =  12.507343278686905;  C[5] = -0.13857109526572012;
+    C[6] =  9.9843695780195716e-6; C[7] = 1.5056327351493116e-7;
+    for (int k = 0; k < 8; k++) {
+        x += c_div(vec2(C[k], 0.0), z + vec2(float(k + 1), 0.0));
+    }
+    vec2 t = z + vec2(7.5, 0.0);
+    return 2.5066282746310002 * c_mul(c_mul(c_pow(t, z + vec2(0.5, 0.0)), c_exp(-t)), x);
+}
+// Reflexión de Euler para Re(z) < 0.5 (polos en 0, −1, −2, …).
+// Salida única (sin return temprano): el compilador HLSL de ANGLE emite el
+// warning X4000 "potentially uninitialized variable" con multi-return aquí.
+vec2 c_gamma(vec2 z) {
+    vec2 r = vec2(0.0);
+    if (z.x < 0.5) {
+        r = c_div(vec2(C_PI, 0.0), c_mul(c_sin(C_PI * z), c_gamma_pos(vec2(1.0, 0.0) - z)));
+    } else {
+        r = c_gamma_pos(z);
+    }
+    return r;
+}
+
+// ── ζ(s) de Riemann ─────────────────────────────────────────────────────────
+// η(s) por aceleración de series alternantes (Cohen–Villegas–Zagier, "Convergence
+// Acceleration of Alternating Series", 2000): converge exponencialmente, ~1 dígito
+// por término. Luego ζ(s)=η(s)/(1−2^{1−s}). Para Re(s)<0 se usa la ecuación
+// funcional ζ(s)=2^s·π^{s−1}·sin(πs/2)·Γ(1−s)·ζ(1−s); el corte de rama se pone en
+// Re=0 (lejos de la línea crítica Re=1/2, donde no debe haber costura). El nº de
+// términos lo fija el usuario vía el uniform uZetaTerms (slider dedicado en MM-02).
+uniform int uZetaTerms;
+
+// base real positiva elevada a exponente complejo: r^s = exp(s·ln r)
+vec2 c_rpow(float base, vec2 s) {
+    float l = log(base);
+    return exp(s.x * l) * vec2(cos(s.y * l), sin(s.y * l));
+}
+
+vec2 c_eta(vec2 s) {
+    int N = uZetaTerms;
+    float n = float(N);
+    float d = pow(3.0 + 2.0 * sqrt(2.0), n);         // (3+√8)^n
+    d = 0.5 * (d + 1.0 / d);
+    float b = -1.0;
+    float c = -d;
+    vec2 sum = vec2(0.0);
+    for (int k = 0; k < 64; k++) {                   // cota constante + break (GLSL ES)
+        if (k >= N) break;
+        c = b - c;
+        float lr = log(float(k) + 1.0);              // ln(k+1)
+        float mag = exp(-s.x * lr);
+        sum += c * (mag * vec2(cos(s.y * lr), -sin(s.y * lr)));   // + c·(k+1)^{-s}
+        float fk = float(k);
+        b = (fk + n) * (fk - n) / ((fk + 0.5) * (fk + 1.0)) * b;
+    }
+    return sum / d;
+}
+
+vec2 c_zeta(vec2 s) {
+    vec2 r;
+    if (s.x >= 0.0) {
+        vec2 den = vec2(1.0, 0.0) - c_rpow(2.0, vec2(1.0, 0.0) - s);
+        r = c_div(c_eta(s), den);                    // ζ(s)=η(s)/(1−2^{1−s}); polo en s=1
+    } else {
+        vec2 om  = vec2(1.0, 0.0) - s;               // 1−s  (Re>1)
+        vec2 den = vec2(1.0, 0.0) - c_rpow(2.0, s);  // denominador de ζ(1−s)
+        vec2 zt  = c_div(c_eta(om), den);            // ζ(1−s)
+        vec2 chi = c_mul(c_rpow(2.0, s), c_rpow(C_PI, s - vec2(1.0, 0.0)));
+        chi = c_mul(chi, c_sin(0.5 * C_PI * s));     // ceros triviales: sin(πs/2)=0 en −2,−4,…
+        chi = c_mul(chi, c_gamma(om));
+        r = c_mul(chi, zt);                          // ecuación funcional
+    }
+    return r;
+}
+`;
+
+/* ── Tokenizador ───────────────────────────────────────────────────────────── */
+
+function tokenize(src) {
+    const toks = [];
+    let i = 0;
+    while (i < src.length) {
+        const ch = src[i];
+        if (ch === ' ' || ch === '\t' || ch === '\n') { i++; continue; }
+        if (ch >= '0' && ch <= '9' || ch === '.') {
+            let j = i;
+            while (j < src.length && src[j] >= '0' && src[j] <= '9') j++;
+            if (src[j] === '.') {
+                j++;
+                if (src[j] === '.') throw new Error(`Número mal formado cerca de «${src.slice(i, j + 1)}»`);
+                while (j < src.length && src[j] >= '0' && src[j] <= '9') j++;
+            }
+            // Exponente solo si sigue el patrón e[+-]?dígitos (si no, "e" es Euler)
+            if (src[j] === 'e') {
+                let k = j + 1;
+                if (src[k] === '+' || src[k] === '-') k++;
+                if (src[k] >= '0' && src[k] <= '9') {
+                    while (k < src.length && src[k] >= '0' && src[k] <= '9') k++;
+                    j = k;
+                }
+            }
+            const text = src.slice(i, j);
+            const v = parseFloat(text);
+            if (!isFinite(v)) throw new Error(`Número inválido «${text}»`);
+            toks.push({ t: 'num', v });
+            i = j;
+            continue;
+        }
+        if (ch >= 'a' && ch <= 'z') {
+            let j = i;
+            while (j < src.length && src[j] >= 'a' && src[j] <= 'z') j++;
+            toks.push({ t: 'id', v: src.slice(i, j) });
+            i = j;
+            continue;
+        }
+        if ('+-*/^'.includes(ch)) { toks.push({ t: 'op', v: ch }); i++; continue; }
+        if (ch === '(') { toks.push({ t: '(' }); i++; continue; }
+        if (ch === ')') { toks.push({ t: ')' }); i++; continue; }
+        throw new Error(`Símbolo no reconocido «${ch}»`);
+    }
+    return toks;
+}
+
+/* ── Parser (descenso recursivo con multiplicación implícita) ──────────────── */
+/* expr := term (('+'|'-') term)*
+   term := unary (('*'|'/'| implícito) unary)*      — implícito: 2z, (z+1)(z-1), 3i
+   unary := ('-'|'+') unary | power
+   power := atom ('^' unary)?                        — asociativa a derecha        */
+
+const FUNC_NAMES = new Set([
+    'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh',
+    'exp', 'log', 'ln', 'sqrt', 'conj', 'abs','re', 'im', 'arg', 'gamma', 'zeta',
+]);
+
+function parse(toks) {
+    let p = 0;
+    const peek = () => toks[p];
+    const next = () => toks[p++];
+
+    function parseExpr() {
+        let a = parseTerm();
+        while (peek() && peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
+            const op = next().v;
+            a = { k: 'bin', op, a, b: parseTerm() };
+        }
+        return a;
+    }
+
+    function parseTerm() {
+        let a = parseUnary();
+        for (;;) {
+            const tk = peek();
+            if (!tk) break;
+            if (tk.t === 'op' && (tk.v === '*' || tk.v === '/')) {
+                const op = next().v;
+                a = { k: 'bin', op, a, b: parseUnary() };
+            } else if (tk.t === 'num' || tk.t === 'id' || tk.t === '(') {
+                a = { k: 'bin', op: '*', a, b: parseUnary() };   // multiplicación implícita
+            } else break;
+        }
+        return a;
+    }
+
+    function parseUnary() {
+        const tk = peek();
+        if (tk && tk.t === 'op' && (tk.v === '-' || tk.v === '+')) {
+            next();
+            const a = parseUnary();
+            return tk.v === '-' ? { k: 'neg', a } : a;
+        }
+        return parsePower();
+    }
+
+    function parsePower() {
+        const base = parseAtom();
+        if (peek() && peek().t === 'op' && peek().v === '^') {
+            next();
+            return { k: 'bin', op: '^', a: base, b: parseUnary() };
+        }
+        return base;
+    }
+
+    function parseAtom() {
+        const tk = next();
+        if (!tk) throw new Error('Expresión incompleta');
+        if (tk.t === 'num') return { k: 'num', re: tk.v, im: 0 };
+        if (tk.t === '(') {
+            const e = parseExpr();
+            if (!peek() || peek().t !== ')') throw new Error('Falta cerrar un paréntesis «)»');
+            next();
+            return e;
+        }
+        if (tk.t === 'id') {
+            const name = tk.v;
+            if (FUNC_NAMES.has(name)) {
+                if (!peek() || peek().t !== '(') {
+                    throw new Error(`La función «${name}» necesita paréntesis: ${name}(z)`);
+                }
+                next();
+                const arg = parseExpr();
+                if (!peek() || peek().t !== ')') throw new Error(`Falta cerrar el paréntesis de «${name}(»`);
+                next();
+                return { k: 'call', fn: name === 'ln' ? 'log' : name, arg };
+            }
+            if (name === 'z') return { k: 'var', name: 'z' };
+            if (name === 't') return { k: 'var', name: 't' };
+            if (name === 'i')  return { k: 'num', re: 0, im: 1 };
+            if (name === 'pi') return { k: 'num', re: Math.PI, im: 0 };
+            if (name === 'e')  return { k: 'num', re: Math.E, im: 0 };
+            throw new Error(`Símbolo desconocido «${name}» (se admiten z, t, i, pi, e y funciones)`);
+        }
+        if (tk.t === 'op') throw new Error(`Operador «${tk.v}» inesperado`);
+        throw new Error('Paréntesis «)» inesperado');
+    }
+
+    const root = parseExpr();
+    if (p < toks.length) {
+        const tk = toks[p];
+        throw new Error(`Elemento inesperado «${tk.v !== undefined ? tk.v : ')'}» al final`);
+    }
+    return root;
+}
+
+/* ── Plegado de constantes (subárboles sin z ni t → literal vec2) ──────────── */
+
+function fold(n) {
+    if (n.k === 'num' || n.k === 'var') return n;
+    if (n.k === 'neg') {
+        const a = fold(n.a);
+        if (a.k === 'num') return { k: 'num', re: -a.re, im: -a.im };
+        return { k: 'neg', a };
+    }
+    if (n.k === 'bin') {
+        const a = fold(n.a), b = fold(n.b);
+        if (a.k === 'num' && b.k === 'num') {
+            const fn = { '+': CX.add, '-': CX.sub, '*': CX.mul, '/': CX.div, '^': CX.pow }[n.op];
+            const r = fn([a.re, a.im], [b.re, b.im]);
+            // Resultados no finitos (p.ej. 1/0) se dejan sin plegar: los resuelve la GPU
+            if (isFinite(r[0]) && isFinite(r[1])) return { k: 'num', re: r[0], im: r[1] };
+        }
+        return { k: 'bin', op: n.op, a, b };
+    }
+    if (n.k === 'call') {
+        const arg = fold(n.arg);
+        if (arg.k === 'num') {
+            const r = CX[n.fn]([arg.re, arg.im]);
+            if (isFinite(r[0]) && isFinite(r[1])) return { k: 'num', re: r[0], im: r[1] };
+        }
+        return { k: 'call', fn: n.fn, arg };
+    }
+    return n;
+}
+
+/* ── Emisor GLSL ───────────────────────────────────────────────────────────── */
+
+function g(x) {
+    // Literal float GLSL válido (siempre con punto decimal o exponente)
+    if (Number.isInteger(x) && Math.abs(x) < 1e9) return x.toFixed(1);
+    const s = String(x);
+    return /[.e]/.test(s) ? s : s + '.0';
+}
+
+const CALL_GLSL = {
+    sin: 'c_sin', cos: 'c_cos', tan: 'c_tan',
+    sinh: 'c_sinh', cosh: 'c_cosh', tanh: 'c_tanh',
+    exp: 'c_exp', log: 'c_log', sqrt: 'c_sqrt', conj: 'c_conj', gamma: 'c_gamma',
+    zeta: 'c_zeta',
+};
+
+function emit(n) {
+    if (n.k === 'num') return `vec2(${g(n.re)}, ${g(n.im)})`;
+    if (n.k === 'var') return n.name === 'z' ? 'z' : 'vec2(uT, 0.0)';
+    if (n.k === 'neg') return `(-${emit(n.a)})`;
+    if (n.k === 'bin') {
+        const A = emit(n.a), B = emit(n.b);
+        switch (n.op) {
+            case '+': return `(${A} + ${B})`;
+            case '-': return `(${A} - ${B})`;
+            case '*':
+                if (n.a.k === 'num' && n.a.im === 0) return `(${g(n.a.re)} * ${B})`;
+                if (n.b.k === 'num' && n.b.im === 0) return `(${g(n.b.re)} * ${A})`;
+                return `c_mul(${A}, ${B})`;
+            case '/':
+                if (n.b.k === 'num' && n.b.im === 0 && n.b.re !== 0) return `(${g(1 / n.b.re)} * ${A})`;
+                return `c_div(${A}, ${B})`;
+            case '^': {
+                const b = n.b;
+                if (b.k === 'num' && b.im === 0) {
+                    if (b.re === 0) return 'vec2(1.0, 0.0)';
+                    if (b.re === 1) return A;
+                    if (b.re === 0.5) return `c_sqrt(${A})`;
+                    if (Number.isInteger(b.re) && Math.abs(b.re) <= 8) {
+                        return `c_ipow(${A}, ${b.re})`;
+                    }
+                }
+                return `c_pow(${A}, ${B})`;
+            }
+        }
+    }
+    if (n.k === 'call') {
+        const A = emit(n.arg);
+        switch (n.fn) {
+            case 'abs': return `vec2(length(${A}), 0.0)`;
+            case 're':  return `vec2((${A}).x, 0.0)`;
+            case 'im':  return `vec2((${A}).y, 0.0)`;
+            case 'arg': return `vec2(atan((${A}).y, (${A}).x), 0.0)`;
+            default:    return `${CALL_GLSL[n.fn]}(${A})`;
+        }
+    }
+    throw new Error('Nodo AST desconocido');
+}
+
+/* ── Evaluador JS (solo para el inspector de cursor, un punto por evento) ──── */
+
+function evalNode(n, z, t) {
+    switch (n.k) {
+        case 'num': return [n.re, n.im];
+        case 'var': return n.name === 'z' ? z : [t, 0];
+        case 'neg': return CX.neg(evalNode(n.a, z, t));
+        case 'bin': {
+            const a = evalNode(n.a, z, t), b = evalNode(n.b, z, t);
+            switch (n.op) {
+                case '+': return CX.add(a, b);
+                case '-': return CX.sub(a, b);
+                case '*': return CX.mul(a, b);
+                case '/': return CX.div(a, b);
+                case '^': return CX.pow(a, b);
+            }
+            break;
+        }
+        case 'call': return CX[n.fn](evalNode(n.arg, z, t));
+    }
+    throw new Error('Nodo AST desconocido');
+}
+
+function usesVar(n, name) {
+    if (n.k === 'var') return n.name === name;
+    if (n.k === 'neg') return usesVar(n.a, name);
+    if (n.k === 'bin') return usesVar(n.a, name) || usesVar(n.b, name);
+    if (n.k === 'call') return usesVar(n.arg, name);
+    return false;
+}
+
+/* ── API pública ───────────────────────────────────────────────────────────── */
+
+/**
+ * Compila una expresión del usuario a GLSL.
+ * @returns {{ glsl: string, usesT: boolean, evaluate: (zr, zi, t) => [re, im] }}
+ * @throws  {Error} con mensaje en español si la expresión es inválida.
+ */
+function compileComplex(src) {
+    const clean = String(src)
+        .toLowerCase()
+        .replace(/π/g, 'pi')
+        .replace(/[−–]/g, '-')
+        .replace(/[·×]/g, '*');
+    if (!clean.trim()) throw new Error('Escribí una función de z, por ejemplo z^2 - t');
+    if (clean.length > 400) throw new Error('Expresión demasiado larga (máx. 400 caracteres)');
+
+    const ast = fold(parse(tokenize(clean)));
+    if (!usesVar(ast, 'z') && ast.k === 'num') {
+        // Constante pura: válida (superficie plana), se avisa desde la UI si hace falta
+    }
+    return {
+        glsl: emit(ast),
+        usesT: usesVar(ast, 't'),
+        evaluate: (zr, zi, t) => evalNode(ast, [zr, zi], t),
+    };
+}
+
+const SIZE = 600;        // lado de la malla en unidades de mundo — plano-piso que llena la escena
+const CAP_Z = 6.0;       // techo de altura en unidades del dominio z (los polos se truncan ahí)
+// Altura isométrica: la elevación vive en la MISMA escala que el dominio, así el relieve
+// se ve como el grafo real z=|f(z)| sin importar el zoom. worldPerZ = SIZE/(2·half).
+// hWorld = worldPerZ · heightScale · (log(1+R) | R),  truncada a worldPerZ · CAP_Z.
+// La escala de altura se CONGELA en el valor de dominio ±6 (max(uHalf, 6)): al hacer
+// zoom del dominio hacia adentro (half<6), el relieve deja de crecer isométricamente en
+// lugar de dispararse. Sin esto, en ±2 un polo se vuelve una aguja de ~900 unidades que
+// entierra la cámara (pantalla negra); con esto, cualquier dominio ≤6 se comporta
+// verticalmente como ±6, que es un régimen seguro. Para half>6 (alejar) es idéntico.
+const HEIGHT_EXPR = /* glsl */`
+    float worldPerZ = ${SIZE.toFixed(1)} / (2.0 * max(uHalf, 6.0));
+    float raw = (uLogHeight > 0.5) ? log(1.0 + R) : R;
+    float h = worldPerZ * uHeightScale * raw;
+    float hCap = worldPerZ * ${CAP_Z.toFixed(1)};
+    if (!(h <= hCap)) h = hCap;   // clamp + guardia NaN/Inf en polos`;
+
+/* ── Shader templates (__EXPR__ se sustituye por el GLSL del parser) ───────── */
+
+const VERT_TEMPLATE = /* glsl */`
+uniform float uT;
+uniform float uHalf;
+uniform float uHeightScale;
+uniform float uLogHeight;
+out vec2 vZ;
+out vec3 vWorld;
+${COMPLEX_GLSL}
+vec2 f(vec2 z) { return __EXPR__; }
+
+void main() {
+    // dominio: uv ∈ [0,1]² → z ∈ [-uHalf, uHalf]²  (geometría ESTÁTICA en CPU)
+    vec2 z = (uv - 0.5) * (2.0 * uHalf);
+    vZ = z;
+    vec2 w = f(z);
+    float R = length(w);
+    ${HEIGHT_EXPR}
+    vec3 p = vec3(position.xy, h);
+    vec4 wp = modelMatrix * vec4(p, 1.0);
+    vWorld = wp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const FRAG_TEMPLATE = /* glsl */`
+uniform float uT;
+uniform float uHalf;
+uniform float uShowMod;
+uniform float uShowPhase;
+uniform float uShowGrid;
+uniform float uGlow;
+uniform vec3  uAccent;
+in vec2 vZ;
+in vec3 vWorld;
+out vec4 outColor;
+${COMPLEX_GLSL}
+vec2 f(vec2 z) { return __EXPR__; }
+
+// Paleta de fase continua con las 4 anclas de ART_DIRECTION.md §2:
+// 0 → rojo #FF3333 · π/2 → verde neón #33FF88 · π → azul #3388FF · 3π/2 → magenta #CC33FF
+vec3 phaseColor(float th) {
+    float u = fract(th / (2.0 * C_PI));      // periódica: el wrap en ±π es continuo
+    float s = u * 4.0;
+    float k = fract(s);
+    k = k * k * (3.0 - 2.0 * k);             // suavizado cúbico entre anclas
+    vec3 c0 = vec3(1.00, 0.20, 0.20);
+    vec3 c1 = vec3(0.20, 1.00, 0.53);
+    vec3 c2 = vec3(0.20, 0.53, 1.00);
+    vec3 c3 = vec3(0.80, 0.20, 1.00);
+    if (s < 1.0) return mix(c0, c1, k);
+    if (s < 2.0) return mix(c1, c2, k);
+    if (s < 3.0) return mix(c2, c3, k);
+    return mix(c3, c0, k);
+}
+
+void main() {
+    // f(z) por fragmento: fase nítida entre vértices (ver cabecera del archivo)
+    vec2 w = f(vZ);
+    float R = length(w);
+    if (!(R < 1e30)) { R = 1e30; w = vec2(1e30, 0.0); }   // NaN/Inf → tratar como polo
+
+    float th = atan(w.y, w.x);
+    vec3 base = phaseColor(th);
+
+    // Luminancia por módulo (Farris): ceros → negro, polos → brillante.
+    // Rango atenuado: a pantalla completa como piso, una superficie muy luminosa
+    // satura con el bloom, así que se comprime el brillo de los tonos medios.
+    float Rn = R / (R + 1.0);
+    vec3 col = base * mix(0.04, 0.62, pow(Rn, 0.75));
+    float pole = smoothstep(0.98, 0.999, Rn);
+    col = mix(col, vec3(1.05), pole);
+
+    // Contornos de módulo constante, espaciado log₂ (cada franja duplica |f|)
+    if (uShowMod > 0.5 && R > 1e-6 && R < 1e20) {
+        float v = log2(R);
+        float d = abs(v - floor(v + 0.5));
+        float wv = fwidth(v);
+        if (wv < 4.0) {
+            float line = 1.0 - smoothstep(0.0, wv * 1.3 + 1e-5, d);
+            col *= 1.0 - 0.33 * line;
+        }
+    }
+    // Líneas de fase constante (cada 30°) — nacen radiales de ceros y polos
+    if (uShowPhase > 0.5) {
+        float v = th * (6.0 / C_PI);
+        float wv = fwidth(v);
+        if (wv < 1.5) {                        // evita el artefacto del salto ±π
+            float d = abs(v - floor(v + 0.5));
+            float line = 1.0 - smoothstep(0.0, wv * 1.3 + 1e-5, d);
+            col *= 1.0 - 0.22 * line;
+        }
+    }
+    // Grilla del dominio z (enteros) + ejes Re/Im resaltados con el acento del tema
+    if (uShowGrid > 0.5) {
+        vec2 gw = fwidth(vZ) + vec2(1e-6);
+        vec2 gd = abs(vZ - floor(vZ + 0.5));
+        float gLine = max(1.0 - smoothstep(0.0, gw.x * 1.2, gd.x),
+                          1.0 - smoothstep(0.0, gw.y * 1.2, gd.y));
+        col = mix(col, col * 0.5 + uAccent * 0.22, gLine * 0.75);
+        float ax = max(1.0 - smoothstep(0.0, gw.x * 1.8, abs(vZ.x)),
+                       1.0 - smoothstep(0.0, gw.y * 1.8, abs(vZ.y)));
+        col += uAccent * ax * 0.35;
+    }
+
+    // Sombreado con normal por derivadas cruzadas (ART_DIRECTION.md §4):
+    // geometría plana en CPU ⇒ la normal real solo existe tras el vertex shader
+    vec3 N = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+    vec3 V = normalize(cameraPosition - vWorld);
+    if (dot(N, V) < 0.0) N = -N;               // doble cara
+    vec3 L = normalize(vec3(0.45, 0.85, 0.3));
+    float diff = max(dot(N, L), 0.0);
+    vec3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 48.0);
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+    col = col * (0.28 + 0.6 * diff)
+        + vec3(0.9, 1.0, 0.95) * (spec * 0.18)
+        + uAccent * (fres * 0.10);
+
+    // Núcleo HDR en los polos: valores > 1 que el UnrealBloomPass vuelve incandescentes
+    col += vec3(1.0, 0.95, 0.85) * (pole * uGlow);
+
+    // Desvanecido de los bordes del dominio hacia el negro: el piso se disuelve en el
+    // infinito sin mostrar un borde duro (ART_DIRECTION §4, "niebla en la base").
+    float edge = max(abs(vZ.x), abs(vZ.y));
+    col *= 1.0 - smoothstep(uHalf * 0.82, uHalf * 0.995, edge);
+
+    outColor = vec4(col, 1.0);
+}
+`;
+
+/* ── Presets ───────────────────────────────────────────────────────────────── */
+
+const PRESETS = [
+    ['Esenciales', [
+        ['z^2',                'z² — cero doble'],
+        ['z^3 - 1',            'z³−1 — 3 raíces'],
+        ['1/z',                '1/z — polo simple'],
+        ['1/(z^2 + 1)',        '1/(z²+1) — polos ±i'],
+        ['sin(z)',             'sin z — ceros en kπ'],
+        ['exp(z)',             'e^z — franjas fase'],
+        ['log(z)',             'ln z — corte rama'],
+    ]],
+    ['Dinámicas (usan t)', [
+        ['z^2 - t',                                        'z²−t — bifurcación'],
+        ['(z - 0.5*exp(i*t)) / (1 - 0.5*exp(-i*t)*z)',     'Blaschke rotante'],
+        ['exp(i*t) * sin(z)',                              'e^{it}·sin z — giro'],
+        ['(z^2 - 1)(z - t*i)',                             '(z²−1)(z−ti) — raíz Im'],
+    ]],
+    ['Funciones especiales', [
+        ['gamma(z)',           'Γ(z) — polos 0,-1...'],
+        ['zeta(z)',            'ζ(z) — Riemann'],
+        ['tan(z)',             'tan z — ceros/polos'],
+        ['exp(1/z)',           'e^{1/z} — esencial'],
+    ]],
+];
+
+class ComplexPlaneScene {
+    constructor(scene, camera, controls, renderer) {
+        this.scene = scene;
+        this.camera = camera;
+        this.controls = controls;
+        this.renderer = renderer;
+
+        // Estado persistente entre visitas (la instancia queda cacheada por main.js)
+        this.state = {
+            expr: 'z^2 - t',
+            t: 0, playing: true, speed: 0.5, dir: 1,
+            heightScale: 0.7, logHeight: true,
+            half: 6.0,
+            showMod: true, showPhase: false, showGrid: true,
+            glow: 0.9,
+            quality: 512,
+            bloomOn: true, bloomStrength: 0.35,
+            polyDeg: 4,
+            zetaTerms: 20,   // términos de la serie η acelerada para ζ(z) (slider dedicado)
+        };
+
+        // Preasignaciones para no instanciar objetos en el loop (PERFORMANCE_GUIDE §2.4)
+        this._ray = new THREE.Raycaster();
+        this._ndc = new THREE.Vector2();
+        this._inspectZ = [0, 0];
+        this._inspectWorld = [0, 0];
+        this._pointerDirty = false;
+        this._pointerIn = false;
+        this._compileTimer = null;
+    }
+
+    /* ── Paneles ───────────────────────────────────────────────────────────── */
+
+    get infoHTML() {
+        return `
+        <div class="info-scene-title">El Plano Complejo en 3D</div>
+        <div class="info-subtitle">Métodos Matemáticos — Análisis Complejo</div>
+        <details class="explanation-block" open>
+            <summary>El problema de las 4 dimensiones</summary>
+            <div class="content">
+                <p>Una función compleja $f:\\mathbb{C}\\to\\mathbb{C}$ necesita 4 dimensiones reales: dos de entrada ($z=x+iy$) y dos de salida ($w=u+iv$). Para verla en 3D combinamos <strong>mapa de alturas</strong> y <strong>coloración de dominios</strong>:</p>
+                $$ f(z) = R\\,e^{i\\theta} $$
+                $$ R=|f(z)| $$
+                $$ \\theta=\\arg f(z) \\in [-\\pi,\\pi] $$
+                <p>La <strong>altura</strong> de la superficie es la magnitud comprimida $h=\\ln(1+R)$ (los polos tienden a $\\infty$; el logaritmo los domestica) y el <strong>color</strong> es la fase $\\theta$ recorrida sobre un ciclo continuo: rojo $\\to$ verde $\\to$ azul $\\to$ magenta $\\to$ rojo.</p>
+            </div>
+        </details>
+        <details class="explanation-block">
+            <summary>Cómo leer la superficie</summary>
+            <div class="content">
+                <p><strong>Ceros:</strong> pozos oscuros donde convergen <em>todos</em> los colores. El orden del cero es la cantidad de veces que el arcoíris completo se repite al rodearlo ($z^2$: dos ciclos).</p>
+                <p><strong>Polos:</strong> picos incandescentes (truncados a una altura máxima). También concentran el ciclo de color completo, pero recorrido en sentido inverso.</p>
+                <p><strong>Cortes de rama:</strong> en $\\ln z$ o $\\sqrt{z}$ el color salta bruscamente a lo largo de una curva: ahí la función multivaluada eligió una rama.</p>
+                <p><strong>Singularidades esenciales:</strong> en $e^{1/z}$ los colores oscilan infinitamente rápido cerca del origen (Casorati-Weierstrass).</p>
+            </div>
+        </details>
+        <details class="explanation-block">
+            <summary>Contornos y grilla</summary>
+            <div class="content">
+                <p><strong>Módulo constante:</strong> franjas oscuras con espaciado logarítmico — de una línea a la siguiente $|f|$ se duplica. Donde se apretujan, la función crece violentamente.</p>
+                <p><strong>Fase constante:</strong> líneas radiales cada $30°$ que nacen de ceros y polos, la versión visual de las curvas de nivel de $\\arg f$.</p>
+                <p><strong>Grilla del dominio:</strong> los enteros del plano $z$ original, con los ejes $\\mathrm{Re}$ / $\\mathrm{Im}$ resaltados — muestra cuánto "estira" $f$ cada región.</p>
+            </div>
+        </details>
+        <details class="explanation-block">
+            <summary>El parámetro t (familias de funciones)</summary>
+            <div class="content">
+                <p>La variable $t$ anima <em>familias</em> $f(z,t)$ sin recompilar nada: viaja a la GPU como uniform. Ejemplo: en $f(z)=z^2-t$ las raíces $\\pm\\sqrt{t}$ colisionan en el origen en $t=0$ y se bifurcan del eje real al imaginario — una bifurcación visible como dos pozos que se fusionan y se separan girados $90°$.</p>
+            </div>
+        </details>
+        <details class="explanation-block">
+            <summary>Motor de render</summary>
+            <div class="content">
+                <p>Tu fórmula se analiza con un parser propio (AST) y se traduce a GLSL: la malla es <em>estática</em> y toda la deformación ocurre en el vertex shader de la GPU; el color se evalúa por píxel. Solo se recompila el shader al editar la fórmula (con debounce); $t$, alturas y toggles son uniforms. Potencias enteras se optimizan a multiplicaciones sucesivas y las constantes se pliegan antes de emitir código. Iluminación con normales por derivadas ($\\partial_x, \\partial_y$ en pantalla), Bloom en los polos y tone mapping ACES.</p>
+                <p style="opacity:.7">Referencias: T. Needham, <em>Visual Complex Analysis</em>; F. Farris, <em>Domain Coloring</em>.</p>
+            </div>
+        </details>
+        `;
+    }
+
+    get controlsHTML() {
+        const s = this.state;
+        const sl = (id, name, min, max, step, val, fmt) => `
+            <div class="controls-section"><div class="control-label"><span class="control-name">${name}</span><span class="control-value" id="${id}-v">${fmt}</span></div>
+            <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`;
+        // Botón que ADMITE salto de línea: sin nowrap/ellipsis, altura automática y
+        // texto centrado — evita el truncado ("NIMAR T ▸ O") en columnas angostas.
+        const bt = (id, label) => `<button id="${id}" class="sci-btn" style="width:100%;box-sizing:border-box;padding:7px 6px;letter-spacing:.4px;font-size:10px;line-height:1.15;white-space:normal;min-height:36px;display:flex;align-items:center;justify-content:center;text-align:center;">${label}</button>`;
+        const selStyle = 'box-sizing:border-box;width:100%;max-width:100%;background:rgba(0,0,0,0.5);border:1px solid var(--green-border);color:var(--text-primary);padding:6px 8px;border-radius:6px;font-size:12px;cursor:pointer;outline:none;text-overflow:ellipsis;';
+        const onoff = (b) => b ? 'ON' : 'OFF';
+
+        const presetOpts = PRESETS.map(([group, items]) =>
+            `<div style="padding:8px 10px; font-size:10px; color:var(--green-mid); background:rgba(0,0,0,0.5); font-family:'Orbitron',monospace; text-transform:uppercase; border-bottom:1px solid rgba(var(--acc),0.2); letter-spacing:1px;">${group}</div>` +
+            items.map(([expr, label]) => `<div class="cp-preset-opt" data-val="${expr}" style="padding:10px 12px; font-size:12px; cursor:pointer; border-bottom:1px solid rgba(var(--acc),0.1); color:var(--text-secondary); transition:all 0.2s; white-space:normal; line-height:1.4;">${label}</div>`).join('')
+        ).join('');
+
+        return `
+        <div class="controls-section">
+            <div class="control-label"><span class="control-name">Función $f(z, t)$</span></div>
+            <input type="text" id="cp-eq" value="${s.expr}" spellcheck="false" autocomplete="off"
+                style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.55);border:1px solid var(--green-border);color:var(--text-primary);padding:9px 12px;border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;">
+            <div id="cp-status" style="font-family:'Share Tech Mono',monospace;font-size:10px;margin-top:5px;color:#7CFFB2;">f(z,t) compilada ✓</div>
+        </div>
+        <div class="controls-section" style="position:relative; z-index:50;">
+            <div class="control-label"><span class="control-name">Presets</span></div>
+            <div id="cp-preset-btn" style="${selStyle} display:flex; justify-content:space-between; align-items:center;">
+                <span id="cp-preset-label" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">— elegir función —</span>
+                <span style="font-size:10px; flex-shrink:0; margin-left:8px;">▼</span>
+            </div>
+            <div id="cp-preset-menu" style="display:none; position:absolute; top:100%; left:0; width:100%; max-height:280px; overflow-y:auto; background:rgba(5,20,15,0.98); border:1px solid var(--green-border); border-radius:6px; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,0.8); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
+                ${presetOpts}
+            </div>
+        </div>
+        ${sl('cp-ndeg', 'Grado máx. del polinomio $n$', 1, 8, 1, s.polyDeg, s.polyDeg)}
+        <div class="controls-section">${bt('cp-poly', '⚄ Generar polinomio aleatorio (grado ≤ n)')}</div>
+        <div class="panel-sep"></div>
+        <div class="controls-section"><div class="control-label"><span class="control-name">$\\zeta(z)$ de Riemann</span></div></div>
+        <div class="controls-section">${bt('cp-critical', 'ζ(z) ▸ ir a la línea crítica')}</div>
+        ${sl('cp-zterms', 'Términos de la serie $\\zeta$', 6, 40, 1, s.zetaTerms, s.zetaTerms)}
+        <div class="panel-sep"></div>
+        ${sl('cp-t', 'Parámetro $t$', -3, 3, 0.01, s.t, s.t.toFixed(2))}
+        <div class="controls-section" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            ${bt('cp-play', 'Animar t ▸ ' + onoff(s.playing))}
+            ${bt('cp-log', 'Altura log ▸ ' + onoff(s.logHeight))}
+        </div>
+        ${sl('cp-speed', 'Velocidad de $t$', 0.1, 2, 0.05, s.speed, s.speed.toFixed(2))}
+        <div class="panel-sep"></div>
+        ${sl('cp-h', 'Escala de altura', 0.2, 3, 0.05, s.heightScale, s.heightScale.toFixed(2))}
+        ${sl('cp-dom', 'Dominio $\\pm$ (zoom)', 2, 40, 0.5, s.half, '±' + s.half.toFixed(1))}
+        <div class="controls-section" style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:6px;">
+            ${bt('cp-mod', '|f| ▸ ' + onoff(s.showMod))}
+            ${bt('cp-phase', 'Fase ▸ ' + onoff(s.showPhase))}
+            ${bt('cp-grid', 'Grilla ▸ ' + onoff(s.showGrid))}
+        </div>
+        <div class="panel-sep"></div>
+        <div class="controls-section">
+            <div class="control-label"><span class="control-name">Resolución de malla</span></div>
+            <select id="cp-quality" class="sci-select">
+                <option value="256" ${s.quality === 256 ? 'selected' : ''}>Bajo (256² · 131k tri)</option>
+                <option value="512" ${s.quality === 512 ? 'selected' : ''}>Medio (512² · 524k tri)</option>
+                <option value="1024" ${s.quality === 1024 ? 'selected' : ''}>Alto (1024² · 2.1M tri)</option>
+            </select>
+        </div>
+        <div class="controls-section">${bt('cp-bloom', 'Bloom ▸ ' + onoff(s.bloomOn))}</div>
+        ${sl('cp-bstr', 'Intensidad del Bloom', 0, 2, 0.05, s.bloomStrength, s.bloomStrength.toFixed(2))}
+        <div class="panel-sep"></div>
+        <div class="controls-section">
+            <div class="control-label"><span class="control-name">Inspector (cursor sobre el plano)</span></div>
+            <div id="cp-readout" style="font-family:'Share Tech Mono',monospace;font-size:11px;line-height:1.7;color:var(--text-primary);background:rgba(0,0,0,0.4);border:1px solid var(--green-border);border-radius:6px;padding:8px 10px;min-height:52px;">— mové el cursor sobre la superficie —</div>
+        </div>
+        `;
+    }
+
+    /* ── Ciclo de vida ─────────────────────────────────────────────────────── */
+
+    init() {
+        const s = this.state;
+
+        // Expandir el far plane para evitar que el plano gigante se corte al rotar
+        this._origFar = this.camera.far;
+        this.camera.far = 10000;
+        this.camera.updateProjectionMatrix();
+
+        // ACES lo aplica el OutputPass leyendo renderer.toneMapping (se restaura en destroy)
+        this._origTone = this.renderer.toneMapping;
+        this._origExposure = this.renderer.toneMappingExposure;
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 0.85;
+
+        // Fondo: en vez de negro PURO (que al rotar/alejar deja un rectángulo negro muerto
+        // "invadiendo" la imagen), un domo de cielo oscuro atmosférico — dark space con un
+        // tenue resplandor de horizonte en el color del tema. Sigue siendo oscuro (mantiene
+        // el mood) pero NUNCA es #000000 vacío, así el negro no invade desde ningún ángulo
+        // ni zoom, sin tener que limitar la cámara. El domo se crea abajo (necesita accent).
+        this._origBg = this.scene.background;
+        this._origFog = this.scene.fog;
+        this.scene.background = new THREE.Color(0x000000);   // respaldo detrás del domo
+        this.scene.fog = null;
+
+        // Ocultar la grilla-piso compartida: el plano complejo ES el piso ahora.
+        this.grid = this.scene.children.find(o => o.isGridHelper);
+        if (this.grid) { this.gridWasVisible = this.grid.visible; this.grid.visible = false; }
+
+        // Cámara elevada mirando el piso amplio (SIZE unidades de lado), en una vista
+        // oblicua dentro de la banda segura (ver límites de órbita abajo).
+        this.camera.position.set(0, 60, 30);
+        this.controls.target.set(0, 3, 0);
+
+        // ── Cámara: rotación LIBRE (a pedido del usuario) + dolly amplio ──────────────
+        // El plano es un piso FINITO sobre fondo negro, así que al inclinar la cámara al
+        // ras aparece el horizonte con el vacío negro encima, y al mirar cenital sobre una
+        // aguja de polo el terreno puede tragar la cámara. Se aceptó ese negro a cambio de
+        // poder rotar sin restricciones (como en el resto de la suite): NO se acota el
+        // ángulo polar. Solo se congela la altura del relieve (ver HEIGHT_EXPR) para que
+        // los polos no crezcan sin cota al reducir el dominio. Límites restaurados en
+        // destroy() por si otra escena dependía de ellos.
+        this._origLimits = {
+            minPolar: this.controls.minPolarAngle, maxPolar: this.controls.maxPolarAngle,
+            minDist: this.controls.minDistance, maxDist: this.controls.maxDistance,
+        };
+        this.controls.minPolarAngle = 0;            // rotación vertical completa…
+        this.controls.maxPolarAngle = Math.PI;      // …hasta pasar por debajo del piso
+        this.controls.minDistance = 2;      // zoom in/out libre con la rueda (a pedido)…
+        this.controls.maxDistance = 2500;   // …hasta muy lejos (el domo de cielo rodea todo)
+
+        // Acento del tema activo (var CSS --acc = "R, G, B") → uniform + marcador
+        const accent = new THREE.Vector3(0.0, 1.0, 0.53);
+        const acc = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim();
+        if (acc) {
+            const p = acc.split(',').map(Number);
+            if (p.length === 3 && p.every(isFinite)) accent.set(p[0] / 255, p[1] / 255, p[2] / 255);
+        }
+
+        // ── Domo de cielo: llena TODO el vacío con oscuridad atmosférica ──────────────
+        // Esfera gigante vista por dentro (BackSide). Gradiente vertical oscuro (más claro
+        // hacia el horizonte, negro hacia el cenit/nadir) + un resplandor tenue en la banda
+        // del horizonte con el color del tema. Se mueve con la cámara, así que mires donde
+        // mires nunca hay #000000 muerto — el negro deja de "invadir". depthWrite:false para
+        // no ocluir nada; su tamaño lo mantiene siempre detrás del piso.
+        this.sky = new THREE.Mesh(
+            new THREE.SphereGeometry(4000, 32, 16),
+            new THREE.ShaderMaterial({
+                side: THREE.BackSide, depthWrite: false, fog: false,
+                uniforms: { uAccent: { value: accent } },
+                vertexShader: `
+                    varying vec3 vDir;
+                    void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `
+                    precision highp float;
+                    varying vec3 vDir;
+                    uniform vec3 uAccent;
+                    void main() {
+                        float y = normalize(vDir).y;                 // -1 nadir · 0 horizonte · 1 cenit
+                        // base MUY oscura: apenas viva cerca del horizonte, casi negra arriba/abajo
+                        vec3 base = mix(vec3(0.006, 0.013, 0.010), vec3(0.0015, 0.004, 0.003), abs(y));
+                        // resplandor gaussiano tenue en la banda del horizonte, con el acento del tema
+                        float glow = exp(-pow(y * 7.0, 2.0));
+                        vec3 col = base + uAccent * glow * 0.028;
+                        gl_FragColor = vec4(col, 1.0);
+                    }`,
+            })
+        );
+        this.sky.frustumCulled = false;
+        this.scene.add(this.sky);
+
+        this.uniforms = {
+            uT:           { value: s.t },
+            uHalf:        { value: s.half },
+            uHeightScale: { value: s.heightScale },
+            uLogHeight:   { value: s.logHeight ? 1 : 0 },
+            uShowMod:     { value: s.showMod ? 1 : 0 },
+            uShowPhase:   { value: s.showPhase ? 1 : 0 },
+            uShowGrid:    { value: s.showGrid ? 1 : 0 },
+            uGlow:        { value: s.glow },
+            uAccent:      { value: accent },
+            uZetaTerms:   { value: s.zetaTerms },
+        };
+
+        // Fórmula vigente (la default es fija y conocida; las del usuario ya pasaron
+        // por la validación de _tryCompile en sesiones previas)
+        this.compiled = compileComplex(s.expr);
+
+        this.material = new THREE.ShaderMaterial({
+            glslVersion: THREE.GLSL3,
+            vertexShader: VERT_TEMPLATE.replace('__EXPR__', this.compiled.glsl),
+            fragmentShader: FRAG_TEMPLATE.replace('__EXPR__', this.compiled.glsl),
+            uniforms: this.uniforms,
+            side: THREE.DoubleSide,
+        });
+
+        // Malla estática: se sube a la GPU UNA vez; jamás se toca por frame
+        this.surface = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE, s.quality, s.quality), this.material);
+        this.surface.rotation.x = -Math.PI / 2;
+        this.scene.add(this.surface);
+
+        // Marcador del inspector (escalado al piso grande)
+        this.marker = new THREE.Mesh(
+            new THREE.SphereGeometry(0.35, 20, 14),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(accent.x, accent.y, accent.z) })
+        );
+        this.marker.visible = false;
+        this.scene.add(this.marker);
+
+        // Post-procesado: Render → UnrealBloom → Output (ACES + sRGB)
+        this.composer = new EffectComposer(this.renderer);
+        this.composer.setPixelRatio(this.renderer.getPixelRatio());
+        this.composer.setSize(window.innerWidth, window.innerHeight);
+        this.renderPass = new RenderPass(this.scene, this.camera);
+        this.bloomPass = new UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            s.bloomStrength, 0.3, 0.85   // strength, radius, threshold (solo picos/polos)
+        );
+        this.bloomPass.enabled = s.bloomOn;
+        this.outputPass = new OutputPass();
+        this.composer.addPass(this.renderPass);
+        this.composer.addPass(this.bloomPass);
+        this.composer.addPass(this.outputPass);
+
+        this._onResize = () => {
+            if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
+        };
+        window.addEventListener('resize', this._onResize);
+
+        const dom = this.renderer.domElement;
+        this._onPointer = (e) => {
+            const r = dom.getBoundingClientRect();
+            this._ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+            this._pointerDirty = true;
+            this._pointerIn = true;
+        };
+        this._onPointerLeave = () => { this._pointerIn = false; this._hideMarker(); };
+        dom.addEventListener('pointermove', this._onPointer);
+        dom.addEventListener('pointerleave', this._onPointerLeave);
+
+        this._lastTime = performance.now();
+    }
+
+    /* Hook opcional del contrato de escena: esta escena toma el control del frame
+       para renderizar a través del EffectComposer (ver animate() en main.js). */
+    render() {
+        this.composer.render();
+    }
+
+    bindUI() {
+        const s = this.state;
+        const $ = (id) => document.getElementById(id);
+
+        // ── Fórmula: debounce de 500 ms (PERFORMANCE_GUIDE §2.2) ──
+        const eq = $('cp-eq');
+        if (eq) {
+            eq.addEventListener('input', () => {
+                clearTimeout(this._compileTimer);
+                this._compileTimer = setTimeout(() => this._tryCompile(eq.value), 500);
+            });
+            eq.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    clearTimeout(this._compileTimer);
+                    this._tryCompile(eq.value);
+                }
+            });
+        }
+
+        const presetBtn = $('cp-preset-btn');
+        const presetMenu = $('cp-preset-menu');
+        const presetLabel = $('cp-preset-label');
+        if (presetBtn && presetMenu) {
+            presetBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                presetMenu.style.display = presetMenu.style.display === 'none' ? 'block' : 'none';
+            });
+            document.addEventListener('click', (e) => {
+                if (!presetBtn.contains(e.target) && !presetMenu.contains(e.target)) {
+                    presetMenu.style.display = 'none';
+                }
+            });
+            document.querySelectorAll('.cp-preset-opt').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const v = opt.getAttribute('data-val');
+                    presetLabel.textContent = opt.textContent;
+                    presetMenu.style.display = 'none';
+                    if (!v) return;
+                    if (eq) eq.value = v;
+                    clearTimeout(this._compileTimer);
+                    this._tryCompile(v);
+                });
+                opt.addEventListener('mouseenter', () => {
+                    opt.style.color = 'var(--text-primary)';
+                    opt.style.background = 'rgba(var(--acc), 0.15)';
+                });
+                opt.addEventListener('mouseleave', () => {
+                    opt.style.color = 'var(--text-secondary)';
+                    opt.style.background = 'transparent';
+                });
+            });
+        }
+
+        const ndeg = $('cp-ndeg');
+        if (ndeg) ndeg.addEventListener('input', () => {
+            s.polyDeg = parseInt(ndeg.value, 10);
+            const v = $('cp-ndeg-v'); if (v) v.textContent = s.polyDeg;
+        });
+        const poly = $('cp-poly');
+        if (poly) poly.addEventListener('click', () => {
+            const f = this._randomPoly(s.polyDeg);
+            if (eq) eq.value = f;
+            clearTimeout(this._compileTimer);
+            this._tryCompile(f);
+        });
+
+        // ── ζ de Riemann ──
+        const zterms = $('cp-zterms');
+        if (zterms) zterms.addEventListener('input', () => {
+            s.zetaTerms = parseInt(zterms.value, 10);
+            this.uniforms.uZetaTerms.value = s.zetaTerms;
+            const v = $('cp-zterms-v'); if (v) v.textContent = s.zetaTerms;
+        });
+        const crit = $('cp-critical');
+        if (crit) crit.addEventListener('click', () => this._goCriticalLine());
+
+        // ── Parámetro t ──
+        const tSl = $('cp-t');
+        this._tSlider = tSl;
+        this._tLabel = $('cp-t-v');
+        if (tSl) tSl.addEventListener('input', () => {
+            s.t = parseFloat(tSl.value);
+            this.uniforms.uT.value = s.t;
+            if (this._tLabel) this._tLabel.textContent = s.t.toFixed(2);
+        });
+        const play = $('cp-play');
+        if (play) play.addEventListener('click', () => {
+            s.playing = !s.playing;
+            play.textContent = 'Animar t ▸ ' + (s.playing ? 'ON' : 'OFF');
+        });
+        const speed = $('cp-speed');
+        if (speed) speed.addEventListener('input', () => {
+            s.speed = parseFloat(speed.value);
+            const v = $('cp-speed-v'); if (v) v.textContent = s.speed.toFixed(2);
+        });
+
+        // ── Visualización (todo uniforms: cero recompilación) ──
+        const h = $('cp-h');
+        if (h) h.addEventListener('input', () => {
+            s.heightScale = parseFloat(h.value);
+            this.uniforms.uHeightScale.value = s.heightScale;
+            const v = $('cp-h-v'); if (v) v.textContent = s.heightScale.toFixed(2);
+        });
+        const dom = $('cp-dom');
+        if (dom) dom.addEventListener('input', () => {
+            s.half = parseFloat(dom.value);
+            this.uniforms.uHalf.value = s.half;
+            const v = $('cp-dom-v'); if (v) v.textContent = '±' + s.half.toFixed(1);
+        });
+        const logBtn = $('cp-log');
+        if (logBtn) logBtn.addEventListener('click', () => {
+            s.logHeight = !s.logHeight;
+            this.uniforms.uLogHeight.value = s.logHeight ? 1 : 0;
+            logBtn.textContent = 'Altura log ▸ ' + (s.logHeight ? 'ON' : 'OFF');
+        });
+        const toggles = [
+            ['cp-mod', 'showMod', 'uShowMod', '|f| ▸ '],
+            ['cp-phase', 'showPhase', 'uShowPhase', 'Fase ▸ '],
+            ['cp-grid', 'showGrid', 'uShowGrid', 'Grilla ▸ '],
+        ];
+        for (const [id, key, uni, label] of toggles) {
+            const b = $(id);
+            if (b) b.addEventListener('click', () => {
+                s[key] = !s[key];
+                this.uniforms[uni].value = s[key] ? 1 : 0;
+                b.textContent = label + (s[key] ? 'ON' : 'OFF');
+            });
+        }
+
+        // ── Render ──
+        const q = $('cp-quality');
+        if (q) q.addEventListener('change', () => {
+            const N = parseInt(q.value, 10);
+            if (!N || N === s.quality) return;
+            s.quality = N;
+            const old = this.surface.geometry;
+            this.surface.geometry = new THREE.PlaneGeometry(SIZE, SIZE, N, N);
+            old.dispose();   // reconstrucción puntual (no ocurre por frame)
+        });
+        const bloomBtn = $('cp-bloom');
+        if (bloomBtn) bloomBtn.addEventListener('click', () => {
+            s.bloomOn = !s.bloomOn;
+            this.bloomPass.enabled = s.bloomOn;
+            bloomBtn.textContent = 'Bloom ▸ ' + (s.bloomOn ? 'ON' : 'OFF');
+        });
+        const bstr = $('cp-bstr');
+        if (bstr) bstr.addEventListener('input', () => {
+            s.bloomStrength = parseFloat(bstr.value);
+            this.bloomPass.strength = s.bloomStrength;
+            const v = $('cp-bstr-v'); if (v) v.textContent = s.bloomStrength.toFixed(2);
+        });
+
+        this._readout = $('cp-readout');
+        this._status = $('cp-status');
+        this._eqInput = eq;
+        this._setStatus(true, this.compiled.usesT ? 'f(z,t) compilada ✓' : 'f(z) compilada ✓ — no depende de t');
+    }
+
+    update() {
+        const now = performance.now();
+        const dt = Math.min((now - this._lastTime) / 1000, 0.05);
+        this._lastTime = now;
+        const s = this.state;
+
+        if (s.playing) {
+            s.t += s.dir * s.speed * dt;
+            if (s.t > 3) { s.t = 3; s.dir = -1; }
+            if (s.t < -3) { s.t = -3; s.dir = 1; }
+            this.uniforms.uT.value = s.t;
+            if (this._tSlider) this._tSlider.value = s.t;
+            if (this._tLabel) this._tLabel.textContent = s.t.toFixed(2);
+        }
+
+        if (this._pointerDirty) {
+            this._pointerDirty = false;
+            this._updateInspector();
+        } else if (s.playing && this.marker.visible) {
+            this._updateReadout();   // t cambió: refrescar f(z) del punto inspeccionado
+        }
+    }
+
+    destroy() {
+        this.camera.far = this._origFar;
+        this.camera.updateProjectionMatrix();
+
+        clearTimeout(this._compileTimer);
+        window.removeEventListener('resize', this._onResize);
+        const dom = this.renderer.domElement;
+        dom.removeEventListener('pointermove', this._onPointer);
+        dom.removeEventListener('pointerleave', this._onPointerLeave);
+
+        this.scene.remove(this.surface);
+        this.scene.remove(this.marker);
+        this.surface.geometry.dispose();
+        this.material.dispose();
+        this.marker.geometry.dispose();
+        this.marker.material.dispose();
+        if (this.sky) {
+            this.scene.remove(this.sky);
+            this.sky.geometry.dispose();
+            this.sky.material.dispose();
+            this.sky = null;
+        }
+
+        if (this.bloomPass && this.bloomPass.dispose) this.bloomPass.dispose();
+        if (this.outputPass && this.outputPass.dispose) this.outputPass.dispose();
+        if (this.composer) {
+            if (this.composer.dispose) this.composer.dispose();
+            else {
+                this.composer.renderTarget1.dispose();
+                this.composer.renderTarget2.dispose();
+            }
+        }
+        this.composer = null;
+        this.surface = null;
+        this.marker = null;
+
+        // Restaurar el estado global del renderer/escena para el resto de la suite
+        this.renderer.toneMapping = this._origTone;
+        this.renderer.toneMappingExposure = this._origExposure;
+        this.scene.background = this._origBg;
+        this.scene.fog = this._origFog;
+        if (this.grid) this.grid.visible = this.gridWasVisible;
+        if (this._origLimits) {
+            this.controls.minPolarAngle = this._origLimits.minPolar;
+            this.controls.maxPolarAngle = this._origLimits.maxPolar;
+            this.controls.minDistance   = this._origLimits.minDist;
+            this.controls.maxDistance   = this._origLimits.maxDist;
+        }
+    }
+
+    /* ── Compilación en vivo ───────────────────────────────────────────────── */
+
+    _tryCompile(src) {
+        let c;
+        try {
+            c = compileComplex(src);
+        } catch (err) {
+            this._setStatus(false, err.message);
+            return;
+        }
+        // Validación GLSL aislada: si falla, el shader vigente queda intacto
+        // (requisito de DEVELOPER_HANDBOOK §3: nunca crashear por una fórmula)
+        const glErr = this._testCompileGLSL(c.glsl);
+        if (glErr) {
+            console.warn('[MM-02] GLSL rechazado para «' + src + '»:\n' + c.glsl + '\n' + glErr);
+            this._setStatus(false, 'La expresión no compiló en la GPU (ver consola)');
+            return;
+        }
+        this.compiled = c;
+        this.state.expr = src;
+        this.material.vertexShader = VERT_TEMPLATE.replace('__EXPR__', c.glsl);
+        this.material.fragmentShader = FRAG_TEMPLATE.replace('__EXPR__', c.glsl);
+        this.material.needsUpdate = true;   // única recompilación permitida
+        this._setStatus(true, c.usesT ? 'f(z,t) compilada ✓' : 'f(z) compilada ✓ — no depende de t');
+    }
+
+    _testCompileGLSL(expr) {
+        const gl = this.renderer.getContext();
+        const src = `#version 300 es
+precision highp float;
+uniform float uT;
+${COMPLEX_GLSL}
+vec2 f(vec2 z) { return ${expr}; }
+out vec4 o_;
+void main() { vec2 r = f(vec2(0.7, 0.3)); o_ = vec4(r, uT, 1.0); }`;
+        const sh = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        const ok = gl.getShaderParameter(sh, gl.COMPILE_STATUS);
+        const log = ok ? null : (gl.getShaderInfoLog(sh) || 'error GLSL desconocido');
+        gl.deleteShader(sh);
+        return log;
+    }
+
+    _setStatus(ok, msg) {
+        if (this._status) {
+            this._status.textContent = ok ? msg : '✗ ' + msg;
+            this._status.style.color = ok ? '#7CFFB2' : '#ff6b6b';
+        }
+        if (this._eqInput) {
+            this._eqInput.style.borderColor = ok ? 'var(--green-border)' : '#ff6b6b';
+        }
+    }
+
+    _randomPoly(n) {
+        const rnd = () => Math.round((Math.random() * 3 - 1.5) * 10) / 10;
+        const terms = [];
+        for (let k = n; k >= 0; k--) {
+            let re = rnd(), im = rnd();
+            if (k === n && re === 0 && im === 0) re = 1;
+            if (re === 0 && im === 0) continue;
+            const c = `(${re}${im >= 0 ? '+' : '-'}${Math.abs(im)}i)`;
+            terms.push(k > 1 ? `${c}z^${k}` : (k === 1 ? `${c}z` : c));
+        }
+        return terms.join(' + ');
+    }
+
+    /* Encuadra ζ(z) sobre la franja crítica: carga la fórmula, abre el dominio para
+       abarcar los primeros ceros no triviales (Re=1/2, Im ≈ 14.13, 21.02, 25.01,
+       30.42 y sus conjugados) y orienta la cámara para verlos alineados. */
+    _goCriticalLine() {
+        const s = this.state;
+        const $ = (id) => document.getElementById(id);
+
+        if (this._eqInput) this._eqInput.value = 'zeta(z)';
+        clearTimeout(this._compileTimer);
+        this._tryCompile('zeta(z)');
+
+        s.half = 38;                       // Im hasta ~38 → 4 ceros no triviales + conjugados
+        this.uniforms.uHalf.value = s.half;
+        const dom = $('cp-dom'); if (dom) dom.value = s.half;
+        const domv = $('cp-dom-v'); if (domv) domv.textContent = '±' + s.half.toFixed(1);
+
+        if (!s.showGrid) {                 // grilla ON: el eje Re=0 ubica la línea crítica (Re=1/2)
+            s.showGrid = true;
+            this.uniforms.uShowGrid.value = 1;
+            const gb = $('cp-grid'); if (gb) gb.textContent = 'Grilla ▸ ON';
+        }
+
+        // Cámara oblicua (dentro de la banda segura) mirando el piso: la línea crítica
+        // (Im variable) corre en profundidad hacia el fondo.
+        this.controls.target.set(0, 0, 0);
+        this.camera.position.set(0, 82, 48);
+        if (this.controls.update) this.controls.update();
+    }
+
+    /* ── Inspector de cursor ───────────────────────────────────────────────── */
+
+    _updateInspector() {
+        if (!this._pointerIn) return;
+        this._ray.setFromCamera(this._ndc, this.camera);
+        const o = this._ray.ray.origin, d = this._ray.ray.direction;
+        if (Math.abs(d.y) < 1e-8) return this._hideMarker();
+        const k = -o.y / d.y;                       // intersección con el plano base y=0
+        if (k <= 0) return this._hideMarker();
+        const px = o.x + d.x * k, pz = o.z + d.z * k;
+        const half = SIZE / 2;
+        if (Math.abs(px) > half || Math.abs(pz) > half) return this._hideMarker();
+
+        this._inspectWorld[0] = px;
+        this._inspectWorld[1] = pz;
+        this._inspectZ[0] = (px / half) * this.state.half;
+        this._inspectZ[1] = (-pz / half) * this.state.half;
+        this._updateReadout();
+    }
+
+    _updateReadout() {
+        const s = this.state;
+        const [zr, zi] = this._inspectZ;
+        let w;
+        try { w = this.compiled.evaluate(zr, zi, s.t); } catch (e) { return this._hideMarker(); }
+        const R = Math.hypot(w[0], w[1]);
+        const finite = isFinite(R);
+        // Misma fórmula que el vertex shader (ver HEIGHT_EXPR): altura congelada a ±6
+        const worldPerZ = SIZE / (2 * Math.max(s.half, 6));
+        const hCap = worldPerZ * CAP_Z;
+        const raw = s.logHeight ? Math.log(1 + R) : R;
+        let hgt = finite ? worldPerZ * s.heightScale * raw : hCap;
+        if (!(hgt <= hCap)) hgt = hCap;
+
+        this.marker.visible = true;
+        this.marker.position.set(this._inspectWorld[0], hgt, this._inspectWorld[1]);
+
+        if (this._readout) {
+            const fm = (x) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(3);
+            this._readout.innerHTML = finite
+                ? `z&nbsp;&nbsp;&nbsp;= ${fm(zr)} ${zi >= 0 ? '+' : '−'} ${Math.abs(zi).toFixed(3)}i<br>` +
+                  `f(z) = ${fm(w[0])} ${w[1] >= 0 ? '+' : '−'} ${Math.abs(w[1]).toFixed(3)}i<br>` +
+                  `|f| = ${R.toFixed(3)} &nbsp;·&nbsp; arg f = ${Math.atan2(w[1], w[0]).toFixed(3)} rad`
+                : `z = ${fm(zr)} ${zi >= 0 ? '+' : '−'} ${Math.abs(zi).toFixed(3)}i<br>f(z) → ∞ &nbsp;(polo)`;
+        }
+    }
+
+    _hideMarker() {
+        if (this.marker) this.marker.visible = false;
+        if (this._readout) this._readout.textContent = '— mové el cursor sobre la superficie —';
+    }
+}
+
+return ComplexPlaneScene;
+
+})();
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   ARNÉS — réplica reducida de helmholtz-sim/main.js (no editar por módulo)
+   Contrato de escena: new SceneClass(scene, camera, controls, renderer)
+   → infoHTML, controlsHTML, init(), bindUI?(), update?(), render?(), destroy()
+   ═════════════════════════════════════════════════════════════════════════════ */
+const infoBody     = document.getElementById('info-body');
+const controlsBody = document.getElementById('controls-body');
+
+window.renderMath = function () {
+    const opts = {
+        delimiters: [
+            { left: '$$', right: '$$', display: true  },
+            { left: '$',  right: '$',  display: false },
+        ],
+        strict: (code) => (code === 'newLineInDisplayMode' ? 'ignore' : 'warn'),
+    };
+    if (window.renderMathInElement) {
+        window.renderMathInElement(infoBody,     opts);
+        window.renderMathInElement(controlsBody, opts);
+    }
+};
+
+function showError(msg) {
+    const el = document.getElementById('pl-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+}
+
+const container = document.getElementById('canvas-container');
+const scene     = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x040d08, 0.045);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(10, 8, 15);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setClearColor(0x040d08, 1);
+container.appendChild(renderer.domElement);
+
+// Resolución adaptativa (un solo sentido: baja si el frame pasa de ~21 ms)
+const DPR_MAX = Math.min(window.devicePixelRatio || 1, 1.75);
+const DPR_MIN = 0.7;
+let dpr = DPR_MAX;
+function applyResolution() {
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+applyResolution();
+const QUAL = { frames: 0, acc: 0, warmup: 0, WINDOW: 60, WARMUP: 90 };
+function sampleFrame(dt) {
+    if (dt <= 0 || dt > 500) return;
+    if (QUAL.warmup < QUAL.WARMUP) { QUAL.warmup++; return; }
+    QUAL.acc += dt;
+    if (++QUAL.frames < QUAL.WINDOW) return;
+    const avg = QUAL.acc / QUAL.frames;
+    QUAL.frames = 0; QUAL.acc = 0;
+    if (avg > 21 && dpr > DPR_MIN) { dpr = Math.max(DPR_MIN, dpr - 0.15); applyResolution(); }
+}
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping   = true;
+controls.autoRotate      = true;
+controls.autoRotateSpeed = 0.4;
+
+scene.add(new THREE.AmbientLight(0x00ff88, 0.3));
+const dirLight = new THREE.DirectionalLight(0x00ff88, 0.8);
+dirLight.position.set(10, 20, 10);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0x004422, 0.5);
+fillLight.position.set(-10, -5, -10);
+scene.add(fillLight);
+const gridHelper = new THREE.GridHelper(120, 120, 0x003322, 0x001a11);
+gridHelper.position.y = -5;
+scene.add(gridHelper);
+
+// Paneles contraíbles (de ui_chrome.js)
+(function () {
+    const infoP = document.getElementById('info-container');
+    const ctrlP = document.getElementById('controls-container');
+    const tabL  = document.getElementById('reveal-left');
+    const tabR  = document.getElementById('reveal-right');
+    function setCollapsed(panel, tab, collapsed) {
+        panel.classList.toggle('collapsed', collapsed);
+        tab.classList.toggle('show', collapsed);
+    }
+    document.querySelectorAll('.panel-collapse').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (btn.getAttribute('data-side') === 'left') setCollapsed(infoP, tabL, true);
+            else setCollapsed(ctrlP, tabR, true);
+        });
+    });
+    tabL.addEventListener('click', () => setCollapsed(infoP, tabL, false));
+    tabR.addEventListener('click', () => setCollapsed(ctrlP, tabR, false));
+})();
+
+let currentScene = null;
+try {
+    currentScene = new SceneClass(scene, camera, controls, renderer);
+    window.__plScene = currentScene;
+    infoBody.innerHTML     = currentScene.infoHTML     || '';
+    controlsBody.innerHTML = currentScene.controlsHTML || '';
+    currentScene.init();
+    if (currentScene.bindUI) currentScene.bindUI();
+    try {
+        renderer.compile(scene, camera);
+        if (currentScene.render) currentScene.render();
+        else renderer.render(scene, camera);
+    } catch (err) {
+        console.warn('[PhysicsLab] Pre-compilación de shaders falló:', err);
+    }
+    window.renderMath();
+    // KaTeX llega por CDN con defer: si aún no estaba, re-renderizar al cargar todo.
+    if (!window.renderMathInElement) window.addEventListener('load', () => window.renderMath());
+} catch (err) {
+    console.error('[PhysicsLab] Error iniciando el módulo:', err);
+    showError('No se pudo iniciar la simulación.\n\n' + (err && err.message ? err.message : err) +
+        '\n\n¿Hay conexión a internet? three.js y KaTeX se cargan desde CDN.');
+    currentScene = null;
+}
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        applyResolution();
+    }, 120);
+});
+
+let prev = 0, updateErrLogged = false, renderErrLogged = false;
+function animate(now) {
+    requestAnimationFrame(animate);
+    if (prev) sampleFrame(now - prev);
+    prev = now;
+    controls.update();
+    try {
+        if (currentScene && currentScene.update) currentScene.update();
+    } catch (err) {
+        if (!updateErrLogged) { updateErrLogged = true; console.error('[PhysicsLab] Error en update():', err); }
+    }
+    try {
+        if (currentScene && currentScene.render) currentScene.render();
+        else renderer.render(scene, camera);
+    } catch (err) {
+        if (!renderErrLogged) { renderErrLogged = true; console.error('[PhysicsLab] Error en render():', err); }
+    }
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
